@@ -4,10 +4,14 @@ Manages rootfs directory creation with proper permissions and extended ACLs.
 """
 
 import os
+import shutil
 import subprocess
 import stat
 from pathlib import Path
 from typing import Tuple, Optional
+
+# Minimum required free space in GB
+MIN_FREE_SPACE_GB = 20
 
 
 class RootFSManager:
@@ -113,6 +117,43 @@ class RootFSManager:
         except Exception as e:
             return False, f"Error checking write permission: {e}"
 
+    def check_free_space(self, min_gb: int = MIN_FREE_SPACE_GB) -> Tuple[bool, str]:
+        """
+        Check if the filesystem has at least the minimum required free space.
+
+        Args:
+            min_gb: Minimum required free space in gigabytes (default: 20GB)
+
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Ensure base path exists
+            self.base_path.mkdir(parents=True, exist_ok=True)
+            
+            # Get disk usage statistics
+            disk_usage = shutil.disk_usage(self.base_path)
+            
+            # Calculate free space in GB
+            free_gb = disk_usage.free / (1024 ** 3)
+            total_gb = disk_usage.total / (1024 ** 3)
+            used_gb = disk_usage.used / (1024 ** 3)
+            
+            if free_gb >= min_gb:
+                return True, (
+                    f"Sufficient disk space: {free_gb:.1f}GB free "
+                    f"(required: {min_gb}GB, total: {total_gb:.1f}GB)"
+                )
+            else:
+                return False, (
+                    f"Insufficient disk space: {free_gb:.1f}GB free, "
+                    f"but {min_gb}GB required. "
+                    f"(used: {used_gb:.1f}GB / {total_gb:.1f}GB)"
+                )
+                
+        except Exception as e:
+            return False, f"Error checking disk space: {e}"
+
     def validate_path(self) -> Tuple[bool, str]:
         """
         Validate that the path is suitable for rootfs creation.
@@ -124,11 +165,19 @@ class RootFSManager:
         can_write, msg = self.check_write_permission()
         if not can_write:
             return False, msg
+        print(f"✓ {msg}")
+        
+        # Check free disk space (minimum 20GB required)
+        has_space, msg = self.check_free_space()
+        if not has_space:
+            return False, msg
+        print(f"✓ {msg}")
         
         # Check ACL support
         acl_support, msg = self.check_filesystem_acl_support()
         if not acl_support:
             return False, msg
+        print(f"✓ {msg}")
         
         return True, "Path is valid for rootfs creation"
 
@@ -298,7 +347,6 @@ class RootFSManager:
             if not self.rootfs_path.exists():
                 return True, "rootfs directory does not exist"
 
-            import shutil
             shutil.rmtree(self.rootfs_path)
             return True, f"Successfully removed {self.rootfs_path}"
 

@@ -7,6 +7,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 ## Features
 
 - 🔌 Connect to OpenShift cluster via API URL and bearer token
+- 🔑 Automatically download and save cluster pull-secret to `.pull-secret`
 - 📦 Collect container images from:
   - Pods
   - Deployments
@@ -18,12 +19,45 @@ This tool connects to an OpenShift cluster, collects information about all conta
 - 💾 Save results to CSV with cluster name and timestamp
 - 🔐 Store credentials in `.env` file for reuse
 - 📁 Create rootfs directory with proper extended ACLs
+- ✅ System checks: verify podman installation and disk space (min 20GB)
 
 ## Requirements
 
-- Python 3.12+
+### System Requirements
+
+- **Python 3.12+**
+- **podman** - Container runtime for image inspection
+  ```bash
+  # Fedora/RHEL/CentOS
+  sudo dnf install podman
+  
+  # Ubuntu/Debian
+  sudo apt install podman
+  
+  # Gentoo
+  sudo emerge app-containers/podman
+  ```
+- **acl** package - For extended ACL support on rootfs
+  ```bash
+  # Fedora/RHEL/CentOS
+  sudo dnf install acl
+  
+  # Ubuntu/Debian
+  sudo apt install acl
+  
+  # Gentoo
+  sudo emerge sys-apps/acl
+  ```
+
+### Cluster Requirements
+
 - Access to an OpenShift cluster with a valid token
-- `acl` package installed (for extended ACL support on rootfs)
+- (Optional) cluster-admin permissions to download pull-secret
+
+### Disk Space Requirements
+
+- **Minimum 20GB of free disk space** on the filesystem where `--rootfs-path` is located
+- This space is required for extracting and inspecting container images
 
 ## Installation
 
@@ -102,22 +136,32 @@ The tool generates a CSV file in the `output` directory with the following colum
 | Column | Description |
 |--------|-------------|
 | `container_name` | Name of the container |
-| `image_name` | Full image name with tag |
 | `namespace` | Kubernetes namespace |
-| `image_id` | Full image ID (when available) |
 | `object_type` | Type of object (Pod, Deployment, StatefulSet, etc.) |
 | `object_name` | Name of the parent object |
+| `image_name` | Full image name with tag |
+| `image_id` | Full image ID (when available) |
 
 Example filename: `mycluster-20241222-143052.csv`
 
 ## RootFS Directory
 
-When using `--rootfs-path`, the tool creates a `rootfs` directory with:
+When using `--rootfs-path`, the tool:
 
-- rwx permissions for the current user and group
-- SGID bit set (new files inherit the group)
-- Extended ACLs for the current user and group
-- Default ACLs for new files/directories
+1. **Validates the filesystem:**
+   - Checks write permissions
+   - Verifies at least 20GB of free disk space
+   - Confirms extended ACL support
+
+2. **Creates a `rootfs` directory with:**
+   - rwx permissions for the current user and group
+   - SGID bit set (new files inherit the group)
+   - Extended ACLs for the current user and group
+   - Default ACLs (inherited by new files/directories):
+     - `d:u:<user>:rwx` - Default user ACL
+     - `d:g:<group>:rwx` - Default group ACL
+     - `d:m::rwx` - Default mask
+     - `d:o::---` - No access for others
 
 This setup ensures the user can create, modify, and delete files in the rootfs directory.
 
@@ -131,13 +175,15 @@ image-cgroupsv2-inspector/
 ├── LICENSE                    # License file
 ├── .gitignore                # Git ignore rules
 ├── .env                      # Credentials (not in git)
+├── .pull-secret              # Cluster pull secret (not in git)
 ├── output/                   # CSV output directory (not in git)
 │   └── <cluster>-<datetime>.csv
 └── src/
     ├── __init__.py
     ├── openshift_client.py   # OpenShift connection handling
     ├── image_collector.py    # Image collection logic
-    └── rootfs_manager.py     # RootFS directory management
+    ├── rootfs_manager.py     # RootFS directory management
+    └── system_checks.py      # System requirements verification
 ```
 
 ## License

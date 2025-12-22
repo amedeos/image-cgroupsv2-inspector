@@ -7,6 +7,9 @@ venv/
 env/
 .env
 
+# OpenShift pull secret (sensitive data)
+.pull-secret
+
 # Python cache
 __pycache__/
 *.py[cod]

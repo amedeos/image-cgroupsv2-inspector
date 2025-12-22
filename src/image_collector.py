@@ -37,11 +37,11 @@ class ContainerImageInfo:
         """Convert to dictionary for DataFrame creation."""
         return {
             "container_name": self.container_name,
-            "image_name": self.image_name,
             "namespace": self.namespace,
-            "image_id": self.image_id,
             "object_type": self.object_type,
-            "object_name": self.object_name
+            "object_name": self.object_name,
+            "image_name": self.image_name,
+            "image_id": self.image_id
         }
 
 
@@ -416,14 +416,17 @@ class ImageCollector:
         Returns:
             DataFrame with image information.
         """
+        # Define column order (image_name and image_id last)
+        columns = [
+            "container_name", "namespace", "object_type",
+            "object_name", "image_name", "image_id"
+        ]
+        
         if not self.images:
-            return pd.DataFrame(columns=[
-                "container_name", "image_name", "namespace",
-                "image_id", "object_type", "object_name"
-            ])
+            return pd.DataFrame(columns=columns)
         
         data = [img.to_dict() for img in self.images]
-        return pd.DataFrame(data)
+        return pd.DataFrame(data, columns=columns)
 
     def save_to_csv(self, cluster_name: str, output_dir: str = "output") -> str:
         """

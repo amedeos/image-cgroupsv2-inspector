@@ -3,6 +3,8 @@ OpenShift Client Module
 Handles connection to OpenShift cluster via API URL and token.
 """
 
+import base64
+import json
 import os
 import re
 from pathlib import Path
@@ -12,6 +14,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv, set_key
 from kubernetes import client
 from kubernetes.client import Configuration, ApiClient
+from kubernetes.client.rest import ApiException
 import urllib3
 
 # Disable SSL warnings for self-signed certificates
@@ -25,7 +28,8 @@ class OpenShiftClient:
     """
 
     def __init__(self, api_url: Optional[str] = None, token: Optional[str] = None, 
-                 env_file: str = ".env", verify_ssl: bool = False):
+                 env_file: str = ".env", pull_secret_file: str = ".pull-secret",
+                 verify_ssl: bool = False):
         """
         Initialize the OpenShift client.
 
@@ -33,9 +37,11 @@ class OpenShiftClient:
             api_url: OpenShift API URL (e.g., https://api.cluster.example.com:6443)
             token: Bearer token for authentication
             env_file: Path to the .env file for storing/loading credentials
+            pull_secret_file: Path to the file for storing the pull secret
             verify_ssl: Whether to verify SSL certificates
         """
         self.env_file = Path(env_file)
+        self.pull_secret_file = Path(pull_secret_file)
         self.verify_ssl = verify_ssl
         self._api_client: Optional[ApiClient] = None
         self._cluster_name: Optional[str] = None
@@ -123,6 +129,9 @@ class OpenShiftClient:
             # Save credentials to .env file
             self._save_to_env()
             
+            # Download and save pull-secret
+            self._download_pull_secret()
+            
             return True
             
         except Exception as e:
@@ -139,6 +148,57 @@ class OpenShiftClient:
         set_key(str(self.env_file), "OPENSHIFT_API_URL", self.api_url)
         set_key(str(self.env_file), "OPENSHIFT_TOKEN", self.token)
         print(f"✓ Credentials saved to {self.env_file}")
+
+    def _download_pull_secret(self) -> bool:
+        """
+        Download the cluster pull-secret from openshift-config namespace
+        and save it to the pull-secret file.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            core_v1 = self.get_core_v1_api()
+            
+            # Get the pull-secret from openshift-config namespace
+            secret = core_v1.read_namespaced_secret(
+                name="pull-secret",
+                namespace="openshift-config"
+            )
+            
+            # Extract the .dockerconfigjson data
+            if secret.data and ".dockerconfigjson" in secret.data:
+                # Decode from base64
+                pull_secret_b64 = secret.data[".dockerconfigjson"]
+                pull_secret_json = base64.b64decode(pull_secret_b64).decode("utf-8")
+                
+                # Pretty print the JSON
+                pull_secret_data = json.loads(pull_secret_json)
+                pull_secret_formatted = json.dumps(pull_secret_data, indent=2)
+                
+                # Save to file
+                self.pull_secret_file.write_text(pull_secret_formatted)
+                
+                # Set restrictive permissions (readable only by owner)
+                os.chmod(self.pull_secret_file, 0o600)
+                
+                print(f"✓ Pull secret saved to {self.pull_secret_file}")
+                return True
+            else:
+                print(f"⚠ Pull secret found but no .dockerconfigjson data")
+                return False
+                
+        except ApiException as e:
+            if e.status == 403:
+                print(f"⚠ No permission to read pull-secret (requires cluster-admin)")
+            elif e.status == 404:
+                print(f"⚠ Pull secret not found in openshift-config namespace")
+            else:
+                print(f"⚠ Failed to download pull-secret: {e.reason}")
+            return False
+        except Exception as e:
+            print(f"⚠ Error downloading pull-secret: {e}")
+            return False
 
     @property
     def api_client(self) -> ApiClient:

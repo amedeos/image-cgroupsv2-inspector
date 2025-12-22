@@ -29,6 +29,7 @@ sys.path.insert(0, str(script_dir))
 from src.openshift_client import OpenShiftClient
 from src.image_collector import ImageCollector
 from src.rootfs_manager import RootFSManager
+from src.system_checks import run_system_checks
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -151,15 +152,7 @@ def setup_rootfs(rootfs_path: str) -> bool:
     
     manager = RootFSManager(rootfs_path)
     
-    # Validate path first
-    valid, msg = manager.validate_path()
-    if not valid:
-        print(f"✗ Path validation failed: {msg}")
-        return False
-    
-    print(f"✓ Path validation passed: {msg}")
-    
-    # Create rootfs directory with ACLs
+    # Create rootfs directory with ACLs (includes validation)
     success, msg = manager.create_rootfs_directory()
     if not success:
         print(f"✗ Failed to create rootfs: {msg}")
@@ -178,6 +171,11 @@ def main() -> int:
     
     # Change to script directory for relative paths
     os.chdir(script_dir)
+    
+    # Run system checks (podman, etc.)
+    if not run_system_checks(verbose=args.verbose):
+        print("\n✗ System checks failed. Please install the required dependencies.")
+        return 1
     
     # Handle rootfs path if provided
     if args.rootfs_path:
