@@ -92,6 +92,12 @@ class ImageAnalyzer:
     JAVA_BINARY_PATTERN = re.compile(r'.*/java$')
     NODE_BINARY_PATTERN = re.compile(r'.*/node$')
     
+    # Paths to exclude (not real binaries)
+    EXCLUDE_PATHS = [
+        '/var/lib/alternatives/',  # Linux alternatives system config files
+        '/etc/alternatives/',      # Alternative symlinks config
+    ]
+    
     # Version parsing patterns
     JAVA_VERSION_PATTERN = re.compile(
         r'(?:openjdk|java) version ["\']?(\d+(?:\.\d+)*(?:_\d+)?(?:-b\d+)?)["\']?',
@@ -375,34 +381,56 @@ class ImageAnalyzer:
         found = []
         
         try:
-            for root, dirs, files in os.walk(base_path):
+            for root, dirs, files in os.walk(base_path, followlinks=True):
                 for file in files:
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, base_path)
                     
                     if pattern.match(f"/{rel_path}"):
-                        # Check if it's executable
-                        if os.access(full_path, os.X_OK):
-                            found.append(full_path)
+                        # Check if file exists (could be broken symlink)
+                        if os.path.exists(full_path) or os.path.islink(full_path):
+                            # For symlinks, resolve to actual file
+                            resolved_path = full_path
+                            if os.path.islink(full_path):
+                                try:
+                                    # Try to resolve symlink within the extracted fs
+                                    link_target = os.readlink(full_path)
+                                    if os.path.isabs(link_target):
+                                        # Absolute symlink - resolve relative to base_path
+                                        resolved_path = os.path.join(base_path, link_target.lstrip('/'))
+                                    else:
+                                        resolved_path = os.path.join(os.path.dirname(full_path), link_target)
+                                    resolved_path = os.path.normpath(resolved_path)
+                                except Exception:
+                                    pass
+                            
+                            # Check if resolved path exists and is a file
+                            if os.path.isfile(resolved_path):
+                                found.append(resolved_path)
+                            elif os.path.isfile(full_path):
+                                found.append(full_path)
         except Exception:
             pass
         
         return found
     
-    def _get_java_version(self, binary_path: str) -> Tuple[str, str, str]:
+    def _get_java_version_in_container(self, image_name: str, binary_path: str, debug: bool = False) -> Tuple[str, str, str]:
         """
-        Get Java version from binary.
+        Get Java version by running the binary inside the container.
         
         Args:
-            binary_path: Path to java binary
+            image_name: Container image name
+            binary_path: Path to java binary inside the container
+            debug: Enable debug output
             
         Returns:
             Tuple of (version, full_output, runtime_type)
         """
         # Java outputs version to stderr
         exit_code, stdout, stderr = self._run_command(
-            [binary_path, "-version"],
-            timeout=30
+            ["podman", "run", "--rm", image_name, binary_path, "-version"],
+            timeout=60,
+            debug=debug
         )
         
         output = stderr + stdout
@@ -429,19 +457,22 @@ class ImageAnalyzer:
         
         return "unknown", output, runtime_type
     
-    def _get_node_version(self, binary_path: str) -> Tuple[str, str]:
+    def _get_node_version_in_container(self, image_name: str, binary_path: str, debug: bool = False) -> Tuple[str, str]:
         """
-        Get Node.js version from binary.
+        Get Node.js version by running the binary inside the container.
         
         Args:
-            binary_path: Path to node binary
+            image_name: Container image name
+            binary_path: Path to node binary inside the container
+            debug: Enable debug output
             
         Returns:
             Tuple of (version, full_output)
         """
         exit_code, stdout, stderr = self._run_command(
-            [binary_path, "--version"],
-            timeout=30
+            ["podman", "run", "--rm", image_name, binary_path, "--version"],
+            timeout=60,
+            debug=debug
         )
         
         output = stdout + stderr
@@ -684,13 +715,32 @@ class ImageAnalyzer:
             print(f"    Searching for Java binaries...")
             java_paths = self._find_binaries(extract_path, self.JAVA_BINARY_PATTERN)
             
+            # Deduplicate - only check unique binaries (skip symlinks to same target)
+            java_checked = set()
             for java_path in java_paths:
-                version, output, runtime_type = self._get_java_version(java_path)
                 rel_path = os.path.relpath(java_path, extract_path)
+                container_path = f"/{rel_path}"
+                
+                # Skip paths that are not real binaries
+                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                    if debug:
+                        print(f"      [DEBUG] Skipping excluded path: {container_path}")
+                    continue
+                
+                # Skip if we already checked a binary with this resolved path
+                resolved = os.path.realpath(java_path)
+                if resolved in java_checked:
+                    continue
+                java_checked.add(resolved)
+                
+                # Run version check inside container
+                version, output, runtime_type = self._get_java_version_in_container(
+                    image_name, container_path, debug=debug
+                )
                 is_compatible = self._check_java_compatibility(version, runtime_type)
                 
                 result.java_binaries.append(BinaryInfo(
-                    path=f"/{rel_path}",
+                    path=container_path,
                     version=version,
                     version_output=output,
                     is_compatible=is_compatible,
@@ -701,13 +751,32 @@ class ImageAnalyzer:
             print(f"    Searching for Node.js binaries...")
             node_paths = self._find_binaries(extract_path, self.NODE_BINARY_PATTERN)
             
+            # Deduplicate - only check unique binaries
+            node_checked = set()
             for node_path in node_paths:
-                version, output = self._get_node_version(node_path)
                 rel_path = os.path.relpath(node_path, extract_path)
+                container_path = f"/{rel_path}"
+                
+                # Skip paths that are not real binaries
+                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                    if debug:
+                        print(f"      [DEBUG] Skipping excluded path: {container_path}")
+                    continue
+                
+                # Skip if we already checked a binary with this resolved path
+                resolved = os.path.realpath(node_path)
+                if resolved in node_checked:
+                    continue
+                node_checked.add(resolved)
+                
+                # Run version check inside container
+                version, output = self._get_node_version_in_container(
+                    image_name, container_path, debug=debug
+                )
                 is_compatible = self._check_node_compatibility(version)
                 
                 result.node_binaries.append(BinaryInfo(
-                    path=f"/{rel_path}",
+                    path=container_path,
                     version=version,
                     version_output=output,
                     is_compatible=is_compatible,
