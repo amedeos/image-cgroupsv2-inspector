@@ -15,15 +15,19 @@ parent-child relationships between Kubernetes objects:
 Only the highest-level controller is included in the output.
 """
 
+import fnmatch
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 
 import pandas as pd
 from kubernetes import client
 
 from .openshift_client import OpenShiftClient
 from .image_analyzer import ImageAnalyzer, ImageAnalysisResult
+
+# Default namespace patterns to exclude (infrastructure namespaces)
+DEFAULT_EXCLUDE_NAMESPACE_PATTERNS = ["openshift-*", "kube-*"]
 
 
 class ContainerImageInfo:
@@ -82,15 +86,53 @@ class ImageCollector:
     generated child objects (ReplicaSets, Jobs, Pods).
     """
 
-    def __init__(self, openshift_client: OpenShiftClient):
+    def __init__(
+        self, 
+        openshift_client: OpenShiftClient,
+        exclude_namespace_patterns: Optional[List[str]] = None
+    ):
         """
         Initialize the image collector.
 
         Args:
             openshift_client: Connected OpenShift client instance.
+            exclude_namespace_patterns: List of glob patterns for namespaces to exclude.
+                                       Supports wildcards like 'openshift-*'.
+                                       Default: ['openshift-*', 'kube-*']
         """
         self.client = openshift_client
         self.images: List[ContainerImageInfo] = []
+        
+        # Set up namespace exclusion patterns
+        if exclude_namespace_patterns is None:
+            self.exclude_patterns = DEFAULT_EXCLUDE_NAMESPACE_PATTERNS.copy()
+        else:
+            self.exclude_patterns = exclude_namespace_patterns
+        
+        # Cache of excluded namespaces (populated during collection)
+        self._excluded_namespaces_cache: Set[str] = set()
+
+    def _is_namespace_excluded(self, namespace: str) -> bool:
+        """
+        Check if a namespace should be excluded based on the configured patterns.
+        
+        Args:
+            namespace: Namespace name to check
+            
+        Returns:
+            True if the namespace matches any exclusion pattern
+        """
+        # Check cache first
+        if namespace in self._excluded_namespaces_cache:
+            return True
+        
+        # Check against patterns
+        for pattern in self.exclude_patterns:
+            if fnmatch.fnmatch(namespace, pattern):
+                self._excluded_namespaces_cache.add(namespace)
+                return True
+        
+        return False
 
     def _get_owner_references(self, metadata) -> List[Dict[str, str]]:
         """
@@ -195,14 +237,6 @@ class ImageCollector:
             "CatalogSource", "ConfigMap"
         ]
         
-        # Namespaces to skip entirely (OpenShift infrastructure)
-        skip_namespaces = {
-            "openshift-etcd",
-            "openshift-kube-apiserver", 
-            "openshift-kube-controller-manager",
-            "openshift-kube-scheduler",
-        }
-        
         # Pod name patterns to skip (static/infrastructure pods)
         skip_patterns = [
             "installer-",
@@ -218,8 +252,8 @@ class ImageCollector:
                 namespace = pod.metadata.namespace
                 pod_name = pod.metadata.name
                 
-                # Skip pods in infrastructure namespaces
-                if namespace in skip_namespaces:
+                # Skip excluded namespaces (uses configured patterns)
+                if self._is_namespace_excluded(namespace):
                     skipped += 1
                     continue
                 
@@ -280,12 +314,19 @@ class ImageCollector:
         print("  Collecting images from Deployments...")
         apps_v1 = self.client.get_apps_v1_api()
         count = 0
+        skipped_ns = 0
         
         try:
             deployments = apps_v1.list_deployment_for_all_namespaces()
             
             for deployment in deployments.items:
                 namespace = deployment.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    skipped_ns += 1
+                    continue
+                
                 deployment_name = deployment.metadata.name
                 
                 # Get containers from pod template
@@ -324,6 +365,11 @@ class ImageCollector:
             
             for sts in statefulsets.items:
                 namespace = sts.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    continue
+                
                 sts_name = sts.metadata.name
                 
                 containers = sts.spec.template.spec.containers or []
@@ -361,6 +407,11 @@ class ImageCollector:
             
             for ds in daemonsets.items:
                 namespace = ds.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    continue
+                
                 ds_name = ds.metadata.name
                 
                 containers = ds.spec.template.spec.containers or []
@@ -399,6 +450,11 @@ class ImageCollector:
             
             for job in jobs.items:
                 namespace = job.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    continue
+                
                 job_name = job.metadata.name
                 
                 # Skip jobs that are managed by a CronJob
@@ -441,6 +497,11 @@ class ImageCollector:
             
             for cj in cronjobs.items:
                 namespace = cj.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    continue
+                
                 cj_name = cj.metadata.name
                 
                 # CronJob has job template -> pod template
@@ -480,6 +541,11 @@ class ImageCollector:
             
             for rs in replicasets.items:
                 namespace = rs.metadata.namespace
+                
+                # Skip excluded namespaces
+                if self._is_namespace_excluded(namespace):
+                    continue
+                
                 rs_name = rs.metadata.name
                 
                 # Skip ReplicaSets that are managed by a Deployment
@@ -523,7 +589,10 @@ class ImageCollector:
         """
         print("\n📦 Collecting container images from cluster...")
         print("  (Only top-level controllers are reported, child objects are skipped)")
+        if self.exclude_patterns:
+            print(f"  (Excluding namespaces matching: {', '.join(self.exclude_patterns)})")
         self.images = []  # Reset
+        self._excluded_namespaces_cache.clear()  # Clear cache for fresh collection
         
         total = 0
         
@@ -541,6 +610,8 @@ class ImageCollector:
         total += self.collect_from_pods()         # Skip all controller-managed
         
         print(f"\n✓ Total containers found: {total}")
+        if self._excluded_namespaces_cache:
+            print(f"  (Excluded {len(self._excluded_namespaces_cache)} namespaces: {', '.join(sorted(self._excluded_namespaces_cache)[:5])}{'...' if len(self._excluded_namespaces_cache) > 5 else ''})")
         return total
 
     def to_dataframe(self) -> pd.DataFrame:

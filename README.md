@@ -125,6 +125,7 @@ oc whoami --show-server
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--analyze` | Analyze images for Java/NodeJS binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
+| `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*` |
 | `-v, --verbose` | Enable verbose output |
 | `--version` | Show version number |
 
@@ -136,6 +137,29 @@ You can also set credentials via environment variables or `.env` file:
 OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
 OPENSHIFT_TOKEN=sha256~xxxxx
 ```
+
+### Namespace Exclusion
+
+By default, infrastructure namespaces matching `openshift-*` and `kube-*` patterns are excluded from image collection. You can customize this behavior with the `--exclude-namespaces` option:
+
+```bash
+# Use default exclusion (openshift-*, kube-*)
+./image-cgroupsv2-inspector --api-url URL --token TOKEN
+
+# Exclude only openshift namespaces
+./image-cgroupsv2-inspector --api-url URL --token TOKEN --exclude-namespaces "openshift-*"
+
+# Exclude custom namespaces
+./image-cgroupsv2-inspector --api-url URL --token TOKEN --exclude-namespaces "openshift-*,kube-*,test-*,dev-*"
+
+# Include all namespaces (no exclusion)
+./image-cgroupsv2-inspector --api-url URL --token TOKEN --exclude-namespaces ""
+```
+
+The exclusion patterns support glob-style wildcards:
+- `*` matches any sequence of characters
+- `openshift-*` matches `openshift-etcd`, `openshift-monitoring`, etc.
+- `*-test` matches `app-test`, `service-test`, etc.
 
 ## Image Analysis for cgroup v2 Compatibility
 
