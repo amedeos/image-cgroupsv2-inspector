@@ -1,0 +1,44 @@
+---
+# Deployment with Java version that SUPPORTS cgroups v2
+# Using Red Hat UBI OpenJDK 17 (fully supports cgroups v2)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-app-compatible
+  namespace: test-java
+  labels:
+    app: java-app-compatible
+    app.kubernetes.io/name: java-app-compatible
+    app.kubernetes.io/part-of: cgroups-v2-test
+    cgroups-v2-compatible: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-app-compatible
+  template:
+    metadata:
+      labels:
+        app: java-app-compatible
+    spec:
+      containers:
+        - name: java-compatible
+          # Red Hat UBI 8 OpenJDK 17 - fully supports cgroups v2
+          # All Java 15+ versions support cgroups v2
+          image: registry.access.redhat.com/ubi8/openjdk-17:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Java version (compatible with cgroups v2):"
+              java -version
+              echo "Sleeping indefinitely..."
+              sleep infinity
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+

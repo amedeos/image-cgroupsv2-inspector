@@ -1,0 +1,9 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-java
+  labels:
+    app.kubernetes.io/name: test-java
+    app.kubernetes.io/part-of: cgroups-v2-test
+
