@@ -111,6 +111,22 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--analyze",
+        dest="analyze",
+        action="store_true",
+        default=False,
+        help="Analyze images for Java/NodeJS binaries (requires --rootfs-path)"
+    )
+
+    parser.add_argument(
+        "--pull-secret",
+        dest="pull_secret",
+        type=str,
+        default=".pull-secret",
+        help="Path to pull-secret file for image authentication (default: .pull-secret)"
+    )
+
+    parser.add_argument(
         "-v", "--verbose",
         dest="verbose",
         action="store_true",
@@ -223,6 +239,27 @@ def main() -> int:
             print("\n⚠ No containers found in the cluster.")
             return 0
         
+        # Analyze images if requested
+        if args.analyze:
+            if not args.rootfs_path:
+                print("\n✗ Error: --analyze requires --rootfs-path to be specified.")
+                return 1
+            
+            # Check if pull-secret exists
+            pull_secret_path = None
+            if args.pull_secret and Path(args.pull_secret).exists():
+                pull_secret_path = args.pull_secret
+                print(f"\n🔑 Using pull-secret: {pull_secret_path}")
+            else:
+                print("\n⚠ Warning: No pull-secret found. Some images may fail to pull.")
+            
+            # Get the rootfs path
+            manager = RootFSManager(args.rootfs_path)
+            rootfs_path = str(manager.get_rootfs_path().parent)
+            
+            # Analyze images
+            collector.analyze_images(rootfs_path, pull_secret_path, debug=args.verbose)
+        
         # Save to CSV
         csv_path = collector.save_to_csv(
             cluster_name=client.cluster_name,
@@ -238,6 +275,26 @@ def main() -> int:
         print(f"   Unique images: {len(unique_images)}")
         print(f"   Namespaces: {df['namespace'].nunique()}")
         print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
+        
+        # Show analysis summary if analysis was performed
+        if args.analyze:
+            java_found = df[df['java_binary'] != 'None']['java_binary'].count()
+            node_found = df[df['node_binary'] != 'None']['node_binary'].count()
+            java_compat = df[df['java_cgroup_v2_compatible'] == 'Yes'].shape[0]
+            java_incompat = df[df['java_cgroup_v2_compatible'] == 'No'].shape[0]
+            node_compat = df[df['node_cgroup_v2_compatible'] == 'Yes'].shape[0]
+            node_incompat = df[df['node_cgroup_v2_compatible'] == 'No'].shape[0]
+            
+            print(f"\n   🔬 Analysis Results:")
+            print(f"      Java found in: {java_found} containers")
+            if java_found > 0:
+                print(f"        ✓ cgroup v2 compatible: {java_compat}")
+                print(f"        ✗ cgroup v2 incompatible: {java_incompat}")
+            print(f"      Node.js found in: {node_found} containers")
+            if node_found > 0:
+                print(f"        ✓ cgroup v2 compatible: {node_compat}")
+                print(f"        ✗ cgroup v2 incompatible: {node_incompat}")
+        
         print(f"\n   Output file: {csv_path}")
         
         if args.verbose:

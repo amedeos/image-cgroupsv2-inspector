@@ -94,6 +94,9 @@ pip install -r requirements.txt
 
 # Specify rootfs path for image extraction
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images
+
+# Analyze images for Java/NodeJS cgroup v2 compatibility
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
 ```
 
 ### Getting OpenShift Credentials
@@ -117,6 +120,8 @@ oc whoami --show-server
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
+| `--analyze` | Analyze images for Java/NodeJS binaries (requires `--rootfs-path`) |
+| `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
 | `-v, --verbose` | Enable verbose output |
 | `--version` | Show version number |
 
@@ -127,6 +132,41 @@ You can also set credentials via environment variables or `.env` file:
 ```bash
 OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
 OPENSHIFT_TOKEN=sha256~xxxxx
+```
+
+## Image Analysis for cgroup v2 Compatibility
+
+When using the `--analyze` flag, the tool:
+
+1. Pulls each unique container image using podman
+2. Exports the container filesystem to a temporary directory
+3. Searches for Java and Node.js binaries
+4. Executes `-version` to determine the exact version
+5. Checks if the version is compatible with cgroup v2
+6. Cleans up the image and filesystem after each analysis
+
+### cgroup v2 Minimum Versions
+
+| Runtime | Minimum Compatible Version |
+|---------|---------------------------|
+| OpenJDK / HotSpot | 8u372, 11.0.16, 15+ |
+| IBM Semeru Runtimes | 8u345-b01, 11.0.16.0, 17.0.4.0, 18.0.2.0+ |
+| IBM SDK Java (IBM Java) | 8.0.7.15+ |
+| Node.js | 20.3.0+ |
+
+### Analysis Example
+
+```bash
+./image-cgroupsv2-inspector --rootfs-path /tmp/analysis --analyze
+
+# Output includes:
+#   🔬 Analysis Results:
+#      Java found in: 45 containers
+#        ✓ cgroup v2 compatible: 30
+#        ✗ cgroup v2 incompatible: 15
+#      Node.js found in: 12 containers
+#        ✓ cgroup v2 compatible: 10
+#        ✗ cgroup v2 incompatible: 2
 ```
 
 ## Output
@@ -141,6 +181,13 @@ The tool generates a CSV file in the `output` directory with the following colum
 | `object_name` | Name of the parent object |
 | `image_name` | Full image name with tag |
 | `image_id` | Full image ID (when available) |
+| `java_binary` | Path to Java binary found (or "None") |
+| `java_version` | Java version detected |
+| `java_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `node_binary` | Path to Node.js binary found (or "None") |
+| `node_version` | Node.js version detected |
+| `node_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `analysis_error` | Error message if analysis failed |
 
 Example filename: `mycluster-20241222-143052.csv`
 

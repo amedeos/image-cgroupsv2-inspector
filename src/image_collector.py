@@ -23,6 +23,7 @@ import pandas as pd
 from kubernetes import client
 
 from .openshift_client import OpenShiftClient
+from .image_analyzer import ImageAnalyzer, ImageAnalysisResult
 
 
 class ContainerImageInfo:
@@ -43,6 +44,15 @@ class ContainerImageInfo:
         self.image_id = image_id
         self.object_type = object_type
         self.object_name = object_name
+        
+        # Analysis results (populated by ImageAnalyzer)
+        self.java_binary: str = ""
+        self.java_version: str = ""
+        self.java_compatible: str = ""
+        self.node_binary: str = ""
+        self.node_version: str = ""
+        self.node_compatible: str = ""
+        self.analysis_error: str = ""
 
     def to_dict(self) -> Dict[str, str]:
         """Convert to dictionary for DataFrame creation."""
@@ -52,7 +62,14 @@ class ContainerImageInfo:
             "object_type": self.object_type,
             "object_name": self.object_name,
             "image_name": self.image_name,
-            "image_id": self.image_id
+            "image_id": self.image_id,
+            "java_binary": self.java_binary,
+            "java_version": self.java_version,
+            "java_cgroup_v2_compatible": self.java_compatible,
+            "node_binary": self.node_binary,
+            "node_version": self.node_version,
+            "node_cgroup_v2_compatible": self.node_compatible,
+            "analysis_error": self.analysis_error
         }
 
 
@@ -533,10 +550,13 @@ class ImageCollector:
         Returns:
             DataFrame with image information.
         """
-        # Define column order (image_name and image_id last)
+        # Define column order (image_name and image_id, then analysis results)
         columns = [
-            "container_name", "namespace", "object_type",
-            "object_name", "image_name", "image_id"
+            "container_name", "namespace", "object_type", "object_name",
+            "image_name", "image_id",
+            "java_binary", "java_version", "java_cgroup_v2_compatible",
+            "node_binary", "node_version", "node_cgroup_v2_compatible",
+            "analysis_error"
         ]
         
         if not self.images:
@@ -581,4 +601,86 @@ class ImageCollector:
         """
         df = self.to_dataframe()
         return df.drop_duplicates(subset=["image_name"]).reset_index(drop=True)
+
+    def analyze_images(
+        self, 
+        rootfs_path: str, 
+        pull_secret_path: Optional[str] = None,
+        debug: bool = False
+    ) -> int:
+        """
+        Analyze all collected images for Java and NodeJS binaries.
+        
+        This method:
+        1. Gets unique images to avoid re-analyzing the same image
+        2. For each unique image, exports and analyzes the container
+        3. Updates all ContainerImageInfo objects with the analysis results
+        4. Cleans up after each image to save disk space
+        
+        Args:
+            rootfs_path: Path where rootfs directory exists
+            pull_secret_path: Path to pull-secret for authentication
+            debug: Enable debug output
+            
+        Returns:
+            Number of images analyzed
+        """
+        print("\n🔬 Analyzing images for Java and NodeJS binaries...")
+        print("  (Each image will be pulled, analyzed, and cleaned up)")
+        
+        # Create analyzer
+        analyzer = ImageAnalyzer(rootfs_path, pull_secret_path)
+        
+        if debug:
+            print(f"  [DEBUG] Analyzer rootfs_base: {analyzer.rootfs_base}")
+            print(f"  [DEBUG] Analyzer rootfs_path: {analyzer.rootfs_path}")
+        
+        # Get unique images
+        unique_images = set()
+        for img in self.images:
+            # Use image_name as key (image_id might be empty for non-Pod objects)
+            unique_images.add(img.image_name)
+        
+        print(f"  Found {len(unique_images)} unique images to analyze")
+        
+        # Analyze each unique image
+        analyzed_count = 0
+        results_cache: Dict[str, ImageAnalysisResult] = {}
+        
+        for idx, image_name in enumerate(unique_images, 1):
+            print(f"\n  [{idx}/{len(unique_images)}] Analyzing: {image_name[:70]}...")
+            
+            try:
+                result = analyzer.analyze_image(image_name, debug=debug)
+                results_cache[image_name] = result
+                analyzed_count += 1
+                
+            except Exception as e:
+                print(f"    Error analyzing image: {e}")
+                import traceback
+                if debug:
+                    traceback.print_exc()
+                # Create error result
+                results_cache[image_name] = ImageAnalysisResult(
+                    image_name=image_name,
+                    image_id="",
+                    error=str(e)
+                )
+        
+        # Update all ContainerImageInfo objects with results
+        print("\n  Updating container records with analysis results...")
+        for img in self.images:
+            result = results_cache.get(img.image_name)
+            if result:
+                img.java_binary = result.java_found
+                img.java_version = result.java_versions
+                img.java_compatible = result.java_compatible
+                img.node_binary = result.node_found
+                img.node_version = result.node_versions
+                img.node_compatible = result.node_compatible
+                img.analysis_error = result.error or ""
+        
+        print(f"\n✓ Analyzed {analyzed_count} unique images")
+        
+        return analyzed_count
 
