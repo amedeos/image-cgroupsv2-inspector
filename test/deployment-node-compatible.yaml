@@ -1,0 +1,43 @@
+---
+# Deployment with Node.js version that SUPPORTS cgroups v2
+# Using Node.js 20 (20.3.0+ supports cgroups v2)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-app-compatible
+  namespace: test-node
+  labels:
+    app: node-app-compatible
+    app.kubernetes.io/name: node-app-compatible
+    app.kubernetes.io/part-of: cgroups-v2-test
+    cgroups-v2-compatible: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-app-compatible
+  template:
+    metadata:
+      labels:
+        app: node-app-compatible
+    spec:
+      containers:
+        - name: node-compatible
+          # Red Hat UBI 8 Node.js 20 - supports cgroups v2 (20.3.0+)
+          image: registry.access.redhat.com/ubi8/nodejs-20:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Node.js version (compatible with cgroups v2):"
+              node --version
+              echo "Sleeping indefinitely..."
+              sleep infinity
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+
