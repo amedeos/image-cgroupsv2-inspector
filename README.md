@@ -1,5 +1,8 @@
 # image-cgroupsv2-inspector
 
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/amedeos/image-cgroupsv2-inspector)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 A tool to inspect container images in an OpenShift cluster for cgroups v2 compatibility.
 
 This tool connects to an OpenShift cluster, collects information about all container images running in pods, deployments, statefulsets, daemonsets, jobs, and cronjobs, and saves the information to a CSV file.
@@ -64,7 +67,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 1. Clone the repository:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/amedeos/image-cgroupsv2-inspector.git
 cd image-cgroupsv2-inspector
 ```
 
@@ -233,7 +236,11 @@ image-cgroupsv2-inspector/
     └── system_checks.py      # System requirements verification
 ```
 
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests on the [GitHub repository](https://github.com/amedeos/image-cgroupsv2-inspector).
+
 ## License
 
-See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
