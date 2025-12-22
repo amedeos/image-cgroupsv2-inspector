@@ -1,0 +1,146 @@
+# image-cgroupsv2-inspector
+
+A tool to inspect container images in an OpenShift cluster for cgroups v2 compatibility.
+
+This tool connects to an OpenShift cluster, collects information about all container images running in pods, deployments, statefulsets, daemonsets, jobs, and cronjobs, and saves the information to a CSV file.
+
+## Features
+
+- 🔌 Connect to OpenShift cluster via API URL and bearer token
+- 📦 Collect container images from:
+  - Pods
+  - Deployments
+  - StatefulSets
+  - DaemonSets
+  - Jobs
+  - CronJobs
+  - ReplicaSets
+- 💾 Save results to CSV with cluster name and timestamp
+- 🔐 Store credentials in `.env` file for reuse
+- 📁 Create rootfs directory with proper extended ACLs
+
+## Requirements
+
+- Python 3.12+
+- Access to an OpenShift cluster with a valid token
+- `acl` package installed (for extended ACL support on rootfs)
+
+## Installation
+
+1. Clone the repository:
+
+```bash
+git clone <repository-url>
+cd image-cgroupsv2-inspector
+```
+
+2. Create and activate a Python virtual environment:
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+```
+
+3. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+### Basic Usage
+
+```bash
+# Connect with API URL and token
+./image-cgroupsv2-inspector --api-url https://api.mycluster.example.com:6443 --token <token>
+
+# Use credentials from .env file (after first connection)
+./image-cgroupsv2-inspector
+
+# Specify rootfs path for image extraction
+./image-cgroupsv2-inspector --rootfs-path /tmp/images
+```
+
+### Getting OpenShift Credentials
+
+```bash
+# Get your token
+oc whoami -t
+
+# Get the API URL
+oc whoami --show-server
+```
+
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--api-url` | OpenShift API URL (e.g., `https://api.mycluster.example.com:6443`) |
+| `--token` | Bearer token for OpenShift authentication |
+| `--rootfs-path` | Path where rootfs directory will be created |
+| `--output-dir` | Directory to save CSV output (default: `output`) |
+| `--env-file` | Path to .env file for credentials (default: `.env`) |
+| `--verify-ssl` | Verify SSL certificates (default: False) |
+| `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
+| `-v, --verbose` | Enable verbose output |
+| `--version` | Show version number |
+
+### Environment Variables
+
+You can also set credentials via environment variables or `.env` file:
+
+```bash
+OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
+OPENSHIFT_TOKEN=sha256~xxxxx
+```
+
+## Output
+
+The tool generates a CSV file in the `output` directory with the following columns:
+
+| Column | Description |
+|--------|-------------|
+| `container_name` | Name of the container |
+| `image_name` | Full image name with tag |
+| `namespace` | Kubernetes namespace |
+| `image_id` | Full image ID (when available) |
+| `object_type` | Type of object (Pod, Deployment, StatefulSet, etc.) |
+| `object_name` | Name of the parent object |
+
+Example filename: `mycluster-20241222-143052.csv`
+
+## RootFS Directory
+
+When using `--rootfs-path`, the tool creates a `rootfs` directory with:
+
+- rwx permissions for the current user and group
+- SGID bit set (new files inherit the group)
+- Extended ACLs for the current user and group
+- Default ACLs for new files/directories
+
+This setup ensures the user can create, modify, and delete files in the rootfs directory.
+
+## Project Structure
+
+```
+image-cgroupsv2-inspector/
+├── image-cgroupsv2-inspector  # Main executable
+├── requirements.txt           # Python dependencies
+├── README.md                  # This file
+├── LICENSE                    # License file
+├── .gitignore                # Git ignore rules
+├── .env                      # Credentials (not in git)
+├── output/                   # CSV output directory (not in git)
+│   └── <cluster>-<datetime>.csv
+└── src/
+    ├── __init__.py
+    ├── openshift_client.py   # OpenShift connection handling
+    ├── image_collector.py    # Image collection logic
+    └── rootfs_manager.py     # RootFS directory management
+```
+
+## License
+
+See the [LICENSE](LICENSE) file for details.
+

@@ -1,0 +1,16 @@
+# OpenShift/Kubernetes client
+kubernetes>=28.1.0
+openshift-client>=1.0.18
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Environment and CLI
+python-dotenv>=1.0.0
+argparse
+
+# For API requests
+requests>=2.31.0
+urllib3>=2.1.0
+

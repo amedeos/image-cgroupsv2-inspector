@@ -1,0 +1,268 @@
+#!/usr/bin/env python3.12
+"""
+image-cgroupsv2-inspector
+=========================
+
+A tool to inspect container images in an OpenShift cluster for cgroups v2 compatibility.
+
+This tool connects to an OpenShift cluster, collects information about all container
+images running in pods, deployments, statefulsets, daemonsets, jobs, and cronjobs,
+and saves the information to a CSV file.
+
+Usage:
+    ./image-cgroupsv2-inspector --api-url <URL> --token <TOKEN> [--rootfs-path <PATH>]
+    ./image-cgroupsv2-inspector  # Uses credentials from .env file
+
+Author: Amedeo
+License: See LICENSE file
+"""
+
+import argparse
+import sys
+import os
+from pathlib import Path
+
+# Add src directory to path
+script_dir = Path(__file__).parent.resolve()
+sys.path.insert(0, str(script_dir))
+
+from src.openshift_client import OpenShiftClient
+from src.image_collector import ImageCollector
+from src.rootfs_manager import RootFSManager
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="image-cgroupsv2-inspector",
+        description="Inspect container images in an OpenShift cluster for cgroups v2 compatibility",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Connect with API URL and token
+  ./image-cgroupsv2-inspector --api-url https://api.mycluster.example.com:6443 --token <token>
+
+  # Use credentials from .env file
+  ./image-cgroupsv2-inspector
+
+  # Specify rootfs path for image extraction
+  ./image-cgroupsv2-inspector --rootfs-path /tmp/images
+
+Environment Variables:
+  OPENSHIFT_API_URL    OpenShift API URL
+  OPENSHIFT_TOKEN      Bearer token for authentication
+
+The tool will save credentials to .env file after successful connection.
+        """
+    )
+
+    parser.add_argument(
+        "--api-url",
+        dest="api_url",
+        type=str,
+        help="OpenShift API URL (e.g., https://api.mycluster.example.com:6443)"
+    )
+
+    parser.add_argument(
+        "--token",
+        dest="token",
+        type=str,
+        help="Bearer token for OpenShift authentication"
+    )
+
+    parser.add_argument(
+        "--rootfs-path",
+        dest="rootfs_path",
+        type=str,
+        help="Path where rootfs directory will be created for image extraction"
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        type=str,
+        default="output",
+        help="Directory to save CSV output (default: output)"
+    )
+
+    parser.add_argument(
+        "--env-file",
+        dest="env_file",
+        type=str,
+        default=".env",
+        help="Path to .env file for credentials (default: .env)"
+    )
+
+    parser.add_argument(
+        "--verify-ssl",
+        dest="verify_ssl",
+        action="store_true",
+        default=False,
+        help="Verify SSL certificates (default: False)"
+    )
+
+    parser.add_argument(
+        "--skip-collection",
+        dest="skip_collection",
+        action="store_true",
+        default=False,
+        help="Skip image collection (useful for testing rootfs setup)"
+    )
+
+    parser.add_argument(
+        "-v", "--verbose",
+        dest="verbose",
+        action="store_true",
+        default=False,
+        help="Enable verbose output"
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 1.0.0"
+    )
+
+    return parser.parse_args()
+
+
+def print_banner():
+    """Print the application banner."""
+    banner = """
+╔══════════════════════════════════════════════════════════════╗
+║           image-cgroupsv2-inspector v1.0.0                   ║
+║     OpenShift Container Image Inspector for cgroups v2       ║
+╚══════════════════════════════════════════════════════════════╝
+    """
+    print(banner)
+
+
+def setup_rootfs(rootfs_path: str) -> bool:
+    """
+    Set up the rootfs directory with proper permissions and ACLs.
+
+    Args:
+        rootfs_path: Path where rootfs directory will be created.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    print(f"\n🔧 Setting up rootfs directory at: {rootfs_path}")
+    
+    manager = RootFSManager(rootfs_path)
+    
+    # Validate path first
+    valid, msg = manager.validate_path()
+    if not valid:
+        print(f"✗ Path validation failed: {msg}")
+        return False
+    
+    print(f"✓ Path validation passed: {msg}")
+    
+    # Create rootfs directory with ACLs
+    success, msg = manager.create_rootfs_directory()
+    if not success:
+        print(f"✗ Failed to create rootfs: {msg}")
+        return False
+    
+    print(f"\n✓ {msg}")
+    return True
+
+
+def main() -> int:
+    """Main entry point."""
+    print_banner()
+    
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Change to script directory for relative paths
+    os.chdir(script_dir)
+    
+    # Handle rootfs path if provided
+    if args.rootfs_path:
+        if not setup_rootfs(args.rootfs_path):
+            return 1
+        
+        if args.skip_collection:
+            print("\n✓ Rootfs setup complete. Skipping image collection.")
+            return 0
+    
+    # Create OpenShift client
+    try:
+        client = OpenShiftClient(
+            api_url=args.api_url,
+            token=args.token,
+            env_file=args.env_file,
+            verify_ssl=args.verify_ssl
+        )
+        
+        # Check if we have credentials
+        if not client.api_url or not client.token:
+            print("\n✗ Error: OpenShift credentials not provided.")
+            print("  Please provide --api-url and --token, or set them in .env file.")
+            print("\n  To get a token, run: oc whoami -t")
+            print("  To get the API URL, run: oc whoami --show-server")
+            return 1
+        
+        # Connect to the cluster
+        print("\n🔌 Connecting to OpenShift cluster...")
+        client.connect()
+        
+    except ValueError as e:
+        print(f"\n✗ Configuration error: {e}")
+        return 1
+    except Exception as e:
+        print(f"\n✗ Connection error: {e}")
+        return 1
+    
+    try:
+        # Collect images
+        collector = ImageCollector(client)
+        total = collector.collect_all()
+        
+        if total == 0:
+            print("\n⚠ No containers found in the cluster.")
+            return 0
+        
+        # Save to CSV
+        csv_path = collector.save_to_csv(
+            cluster_name=client.cluster_name,
+            output_dir=args.output_dir
+        )
+        
+        # Show summary
+        df = collector.to_dataframe()
+        unique_images = collector.get_unique_images()
+        
+        print("\n📊 Summary:")
+        print(f"   Total containers: {len(df)}")
+        print(f"   Unique images: {len(unique_images)}")
+        print(f"   Namespaces: {df['namespace'].nunique()}")
+        print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
+        print(f"\n   Output file: {csv_path}")
+        
+        if args.verbose:
+            print("\n📋 Top 10 most used images:")
+            top_images = df['image_name'].value_counts().head(10)
+            for img, count in top_images.items():
+                print(f"   {count:4d} × {img}")
+        
+    except Exception as e:
+        print(f"\n✗ Error during collection: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+    
+    finally:
+        # Disconnect
+        client.disconnect()
+    
+    print("\n✓ Done!")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
