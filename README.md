@@ -239,6 +239,58 @@ When using `--rootfs-path`, the tool:
 
 This setup ensures the user can create, modify, and delete files in the rootfs directory.
 
+## Test Resources
+
+The `test/` directory contains sample Kubernetes manifests to test the cgroups v2 compatibility detection on a real OpenShift cluster.
+
+### Test Files
+
+| File | Description |
+|------|-------------|
+| `namespace-java.yaml` | Namespace `test-java` for Java test deployments |
+| `namespace-node.yaml` | Namespace `test-node` for Node.js test deployments |
+| `deployment-java-compatible.yaml` | Deployment with OpenJDK 17 (cgroups v2 compatible) |
+| `deployment-java-incompatible.yaml` | Deployment with OpenJDK 8u362 (cgroups v2 **incompatible**) |
+| `deployment-node-compatible.yaml` | Deployment with Node.js 20 (cgroups v2 compatible) |
+| `deployment-node-incompatible.yaml` | Deployment with Node.js 18 (cgroups v2 **incompatible**) |
+
+### Deploying Test Resources
+
+```bash
+# Deploy Java test resources
+oc apply -f test/namespace-java.yaml
+oc apply -f test/deployment-java-compatible.yaml
+oc apply -f test/deployment-java-incompatible.yaml
+
+# Deploy Node.js test resources
+oc apply -f test/namespace-node.yaml
+oc apply -f test/deployment-node-compatible.yaml
+oc apply -f test/deployment-node-incompatible.yaml
+
+# Verify pods are running
+oc get pods -n test-java
+oc get pods -n test-node
+```
+
+### Running Analysis on Test Resources
+
+```bash
+# Analyze only the test namespaces
+./image-cgroupsv2-inspector \
+  --api-url <URL> \
+  --token <TOKEN> \
+  --rootfs-path /tmp/rootfs \
+  --exclude-namespaces "openshift-*,kube-*" \
+  --analyze \
+  -v
+```
+
+### Cleanup
+
+```bash
+oc delete namespace test-java test-node
+```
+
 ## Project Structure
 
 ```
@@ -252,12 +304,20 @@ image-cgroupsv2-inspector/
 ├── .pull-secret              # Cluster pull secret (not in git)
 ├── output/                   # CSV output directory (not in git)
 │   └── <cluster>-<datetime>.csv
-└── src/
-    ├── __init__.py
-    ├── openshift_client.py   # OpenShift connection handling
-    ├── image_collector.py    # Image collection logic
-    ├── rootfs_manager.py     # RootFS directory management
-    └── system_checks.py      # System requirements verification
+├── src/
+│   ├── __init__.py
+│   ├── openshift_client.py   # OpenShift connection handling
+│   ├── image_collector.py    # Image collection logic
+│   ├── image_analyzer.py     # Image analysis for cgroups v2
+│   ├── rootfs_manager.py     # RootFS directory management
+│   └── system_checks.py      # System requirements verification
+└── test/                     # Test Kubernetes manifests
+    ├── namespace-java.yaml
+    ├── namespace-node.yaml
+    ├── deployment-java-compatible.yaml
+    ├── deployment-java-incompatible.yaml
+    ├── deployment-node-compatible.yaml
+    └── deployment-node-incompatible.yaml
 ```
 
 ## Contributing
