@@ -427,8 +427,9 @@ class ImageAnalyzer:
             Tuple of (version, full_output, runtime_type)
         """
         # Java outputs version to stderr
+        # Use --entrypoint to override any ENTRYPOINT in the image (e.g., Spring Boot apps)
         exit_code, stdout, stderr = self._run_command(
-            ["podman", "run", "--rm", image_name, binary_path, "-version"],
+            ["podman", "run", "--rm", "--entrypoint", binary_path, image_name, "-version"],
             timeout=60,
             debug=debug
         )
@@ -469,8 +470,9 @@ class ImageAnalyzer:
         Returns:
             Tuple of (version, full_output)
         """
+        # Use --entrypoint to override any ENTRYPOINT in the image
         exit_code, stdout, stderr = self._run_command(
-            ["podman", "run", "--rm", image_name, binary_path, "--version"],
+            ["podman", "run", "--rm", "--entrypoint", binary_path, image_name, "--version"],
             timeout=60,
             debug=debug
         )
