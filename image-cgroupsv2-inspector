@@ -273,14 +273,20 @@ def main() -> int:
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
             
-            # Analyze images
-            collector.analyze_images(rootfs_path, pull_secret_path, debug=args.verbose)
-        
-        # Save to CSV
-        csv_path = collector.save_to_csv(
-            cluster_name=client.cluster_name,
-            output_dir=args.output_dir
-        )
+            # Analyze images (saves CSV after each image for resumability)
+            _, csv_path = collector.analyze_images(
+                rootfs_path, 
+                pull_secret_path, 
+                debug=args.verbose,
+                cluster_name=client.cluster_name,
+                output_dir=args.output_dir
+            )
+        else:
+            # Save to CSV (only if not analyzing - analysis saves incrementally)
+            csv_path = collector.save_to_csv(
+                cluster_name=client.cluster_name,
+                output_dir=args.output_dir
+            )
         
         # Show summary
         df = collector.to_dataframe()

@@ -677,8 +677,10 @@ class ImageCollector:
         self, 
         rootfs_path: str, 
         pull_secret_path: Optional[str] = None,
-        debug: bool = False
-    ) -> int:
+        debug: bool = False,
+        cluster_name: Optional[str] = None,
+        output_dir: str = "output"
+    ) -> tuple:
         """
         Analyze all collected images for Java and NodeJS binaries.
         
@@ -686,18 +688,23 @@ class ImageCollector:
         1. Gets unique images to avoid re-analyzing the same image
         2. For each unique image, exports and analyzes the container
         3. Updates all ContainerImageInfo objects with the analysis results
-        4. Cleans up after each image to save disk space
+        4. Saves CSV after each image (for resumability if interrupted)
+        5. Cleans up after each image to save disk space
         
         Args:
             rootfs_path: Path where rootfs directory exists
             pull_secret_path: Path to pull-secret for authentication
             debug: Enable debug output
+            cluster_name: Cluster name for CSV filename (if provided, saves after each image)
+            output_dir: Directory to save CSV output
             
         Returns:
-            Number of images analyzed
+            Tuple of (number of images analyzed, CSV filepath or None)
         """
         print("\n🔬 Analyzing images for Java and NodeJS binaries...")
         print("  (Each image will be pulled, analyzed, and cleaned up)")
+        if cluster_name:
+            print("  (CSV will be saved after each image for resumability)")
         
         # Create analyzer
         analyzer = ImageAnalyzer(rootfs_path, pull_secret_path)
@@ -713,6 +720,15 @@ class ImageCollector:
             unique_images.add(img.image_name)
         
         print(f"  Found {len(unique_images)} unique images to analyze")
+        
+        # Generate CSV filename once (fixed for this run)
+        csv_filepath = None
+        if cluster_name:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            filename = f"{cluster_name}-{timestamp}.csv"
+            csv_filepath = output_path / filename
         
         # Analyze each unique image
         analyzed_count = 0
@@ -737,21 +753,28 @@ class ImageCollector:
                     image_id="",
                     error=str(e)
                 )
-        
-        # Update all ContainerImageInfo objects with results
-        print("\n  Updating container records with analysis results...")
-        for img in self.images:
-            result = results_cache.get(img.image_name)
-            if result:
-                img.java_binary = result.java_found
-                img.java_version = result.java_versions
-                img.java_compatible = result.java_compatible
-                img.node_binary = result.node_found
-                img.node_version = result.node_versions
-                img.node_compatible = result.node_compatible
-                img.analysis_error = result.error or ""
+            
+            # Update all ContainerImageInfo objects with current results
+            for img in self.images:
+                result = results_cache.get(img.image_name)
+                if result:
+                    img.java_binary = result.java_found
+                    img.java_version = result.java_versions
+                    img.java_compatible = result.java_compatible
+                    img.node_binary = result.node_found
+                    img.node_version = result.node_versions
+                    img.node_compatible = result.node_compatible
+                    img.analysis_error = result.error or ""
+            
+            # Save CSV after each image analysis (for resumability)
+            if csv_filepath:
+                df = self.to_dataframe()
+                df.to_csv(csv_filepath, index=False)
+                print(f"    💾 Progress saved to {csv_filepath}")
         
         print(f"\n✓ Analyzed {analyzed_count} unique images")
+        if csv_filepath:
+            print(f"  Final CSV saved to: {csv_filepath}")
         
-        return analyzed_count
+        return analyzed_count, str(csv_filepath) if csv_filepath else None
 
