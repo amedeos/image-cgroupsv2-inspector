@@ -428,8 +428,25 @@ class ImageAnalyzer:
         """
         # Java outputs version to stderr
         # Use --entrypoint to override any ENTRYPOINT in the image (e.g., Spring Boot apps)
+        # Additional options handle permission issues with non-root user images
         exit_code, stdout, stderr = self._run_command(
-            ["podman", "run", "--rm", "--entrypoint", binary_path, image_name, "-version"],
+            [
+                "podman", "run", "--rm",
+                "--entrypoint", binary_path,
+                "--privileged",
+                "--security-opt=no-new-privileges",
+                "--cap-drop=all",
+                "--cap-add=chown",
+                "--cap-add=dac_override",
+                "--cap-add=fowner",
+                "--cap-add=setuid",
+                "--cap-add=setgid",
+                "--userns=keep-id:uid=0,gid=0",
+                "--env", "GUID=0",
+                "--env", "PUID=0",
+                image_name,
+                "-version"
+            ],
             timeout=60,
             debug=debug
         )
@@ -471,8 +488,25 @@ class ImageAnalyzer:
             Tuple of (version, full_output)
         """
         # Use --entrypoint to override any ENTRYPOINT in the image
+        # Additional options handle permission issues with non-root user images
         exit_code, stdout, stderr = self._run_command(
-            ["podman", "run", "--rm", "--entrypoint", binary_path, image_name, "--version"],
+            [
+                "podman", "run", "--rm",
+                "--entrypoint", binary_path,
+                "--privileged",
+                "--security-opt=no-new-privileges",
+                "--cap-drop=all",
+                "--cap-add=chown",
+                "--cap-add=dac_override",
+                "--cap-add=fowner",
+                "--cap-add=setuid",
+                "--cap-add=setgid",
+                "--userns=keep-id:uid=0,gid=0",
+                "--env", "GUID=0",
+                "--env", "PUID=0",
+                image_name,
+                "--version"
+            ],
             timeout=60,
             debug=debug
         )
