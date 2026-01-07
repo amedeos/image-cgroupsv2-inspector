@@ -766,15 +766,22 @@ class ImageCollector:
                     img.node_compatible = result.node_compatible
                     img.analysis_error = result.error or ""
             
-            # Save CSV after each image analysis (for resumability)
+            # Save CSV after each image analysis (only analyzed images for efficiency)
             if csv_filepath:
+                # Filter to only include containers whose images have been analyzed
+                analyzed_image_names = set(results_cache.keys())
                 df = self.to_dataframe()
-                df.to_csv(csv_filepath, index=False)
-                print(f"    💾 Progress saved to {csv_filepath}")
+                df_analyzed = df[df['image_name'].isin(analyzed_image_names)]
+                df_analyzed.to_csv(csv_filepath, index=False)
+                print(f"    💾 Progress saved: {len(df_analyzed)} rows ({idx}/{len(unique_images)} images)")
         
         print(f"\n✓ Analyzed {analyzed_count} unique images")
+        
+        # Final save with ALL rows (now all images are analyzed)
         if csv_filepath:
-            print(f"  Final CSV saved to: {csv_filepath}")
+            df = self.to_dataframe()
+            df.to_csv(csv_filepath, index=False)
+            print(f"  Final CSV saved to: {csv_filepath} ({len(df)} rows)")
         
         return analyzed_count, str(csv_filepath) if csv_filepath else None
 
