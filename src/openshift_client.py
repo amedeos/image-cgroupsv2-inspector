@@ -56,8 +56,8 @@ class OpenShiftClient:
 
     def _extract_cluster_name(self) -> str:
         """
-        Extract cluster name from API URL.
-        Example: https://api.mycluster.example.com:6443 -> mycluster
+        Extract cluster name with base domain from API URL.
+        Example: https://api.mycluster.example.com:6443 -> mycluster.example.com
         """
         if not self.api_url:
             return "unknown"
@@ -66,20 +66,13 @@ class OpenShiftClient:
             parsed = urlparse(self.api_url)
             hostname = parsed.hostname or ""
             
-            # Try to extract cluster name from hostname
-            # Pattern: api.<clustername>.<domain>
-            match = re.match(r"api\.([^.]+)\.", hostname)
-            if match:
-                return match.group(1)
+            # Remove 'api.' prefix if present
+            # Pattern: api.<clustername>.<basedomain> -> <clustername>.<basedomain>
+            if hostname.startswith("api."):
+                return hostname[4:]  # Remove 'api.' prefix
             
-            # Fallback: use first part of hostname
-            parts = hostname.split(".")
-            if parts and parts[0] == "api" and len(parts) > 1:
-                return parts[1]
-            elif parts:
-                return parts[0]
-            
-            return "unknown"
+            # Fallback: return full hostname
+            return hostname if hostname else "unknown"
         except Exception:
             return "unknown"
 
