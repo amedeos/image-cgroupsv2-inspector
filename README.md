@@ -100,6 +100,10 @@ pip install -r requirements.txt
 
 # Analyze images for Java/NodeJS cgroup v2 compatibility
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
+
+# Inspect only a specific namespace
+./image-cgroupsv2-inspector -n my-namespace
+./image-cgroupsv2-inspector --namespace my-namespace --analyze --rootfs-path /tmp/images
 ```
 
 ### Getting OpenShift Credentials
@@ -118,6 +122,7 @@ oc whoami --show-server
 |--------|-------------|
 | `--api-url` | OpenShift API URL (e.g., `https://api.mycluster.example.com:6443`) |
 | `--token` | Bearer token for OpenShift authentication |
+| `-n, --namespace` | Only inspect images in the specified namespace. If not provided, all namespaces are inspected |
 | `--rootfs-path` | Path where rootfs directory will be created |
 | `--output-dir` | Directory to save CSV output (default: `output`) |
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
@@ -125,7 +130,7 @@ oc whoami --show-server
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--analyze` | Analyze images for Java/NodeJS binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
-| `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*` |
+| `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
 | `-v, --verbose` | Enable verbose output |
 | `--version` | Show version number |
 
@@ -137,6 +142,26 @@ You can also set credentials via environment variables or `.env` file:
 OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
 OPENSHIFT_TOKEN=sha256~xxxxx
 ```
+
+### Single Namespace Inspection
+
+You can limit the image inspection to a specific namespace using the `-n` or `--namespace` option:
+
+```bash
+# Inspect only the 'my-app' namespace
+./image-cgroupsv2-inspector -n my-app
+
+# Analyze images in a specific namespace
+./image-cgroupsv2-inspector --namespace my-app --rootfs-path /tmp/images --analyze
+
+# With verbose output
+./image-cgroupsv2-inspector -n production-apps --analyze --rootfs-path /tmp/images -v
+```
+
+When `--namespace` is specified:
+- Only resources in that namespace are inspected
+- The `--exclude-namespaces` option is ignored
+- The tool uses namespace-specific API calls (more efficient for large clusters)
 
 ### Namespace Exclusion
 

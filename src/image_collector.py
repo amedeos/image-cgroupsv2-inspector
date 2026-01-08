@@ -84,12 +84,17 @@ class ImageCollector:
     Implements smart deduplication: only the highest-level controller
     (Deployment, StatefulSet, DaemonSet, CronJob) is reported, not the
     generated child objects (ReplicaSets, Jobs, Pods).
+    
+    Supports two modes:
+    - Single namespace mode: collect only from a specific namespace
+    - All namespaces mode: collect from all namespaces (with optional exclusions)
     """
 
     def __init__(
         self, 
         openshift_client: OpenShiftClient,
-        exclude_namespace_patterns: Optional[List[str]] = None
+        exclude_namespace_patterns: Optional[List[str]] = None,
+        namespace: Optional[str] = None
     ):
         """
         Initialize the image collector.
@@ -99,12 +104,19 @@ class ImageCollector:
             exclude_namespace_patterns: List of glob patterns for namespaces to exclude.
                                        Supports wildcards like 'openshift-*'.
                                        Default: ['openshift-*', 'kube-*']
+                                       Ignored when namespace is specified.
+            namespace: If specified, only collect from this namespace.
+                      When set, exclude_namespace_patterns is ignored.
         """
         self.client = openshift_client
         self.images: List[ContainerImageInfo] = []
+        self.namespace = namespace  # Single namespace mode if set
         
-        # Set up namespace exclusion patterns
-        if exclude_namespace_patterns is None:
+        # Set up namespace exclusion patterns (only used when namespace is None)
+        if namespace:
+            # Single namespace mode - no exclusion patterns needed
+            self.exclude_patterns = []
+        elif exclude_namespace_patterns is None:
             self.exclude_patterns = DEFAULT_EXCLUDE_NAMESPACE_PATTERNS.copy()
         else:
             self.exclude_patterns = exclude_namespace_patterns
@@ -246,13 +258,18 @@ class ImageCollector:
         ]
         
         try:
-            pods = core_v1.list_pod_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                pods = core_v1.list_namespaced_pod(namespace=self.namespace)
+            else:
+                pods = core_v1.list_pod_for_all_namespaces()
             
             for pod in pods.items:
                 namespace = pod.metadata.namespace
                 pod_name = pod.metadata.name
                 
                 # Skip excluded namespaces (uses configured patterns)
+                # In single namespace mode, this is a no-op
                 if self._is_namespace_excluded(namespace):
                     skipped += 1
                     continue
@@ -303,7 +320,7 @@ class ImageCollector:
 
     def collect_from_deployments(self) -> int:
         """
-        Collect images from all Deployments in the cluster.
+        Collect images from Deployments.
         
         Deployments are top-level controllers. Their ReplicaSets and Pods
         will be skipped during collection.
@@ -317,12 +334,16 @@ class ImageCollector:
         skipped_ns = 0
         
         try:
-            deployments = apps_v1.list_deployment_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                deployments = apps_v1.list_namespaced_deployment(namespace=self.namespace)
+            else:
+                deployments = apps_v1.list_deployment_for_all_namespaces()
             
             for deployment in deployments.items:
                 namespace = deployment.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     skipped_ns += 1
                     continue
@@ -349,7 +370,7 @@ class ImageCollector:
 
     def collect_from_statefulsets(self) -> int:
         """
-        Collect images from all StatefulSets in the cluster.
+        Collect images from StatefulSets.
         
         StatefulSets are top-level controllers. Their Pods will be skipped.
 
@@ -361,12 +382,16 @@ class ImageCollector:
         count = 0
         
         try:
-            statefulsets = apps_v1.list_stateful_set_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                statefulsets = apps_v1.list_namespaced_stateful_set(namespace=self.namespace)
+            else:
+                statefulsets = apps_v1.list_stateful_set_for_all_namespaces()
             
             for sts in statefulsets.items:
                 namespace = sts.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     continue
                 
@@ -391,7 +416,7 @@ class ImageCollector:
 
     def collect_from_daemonsets(self) -> int:
         """
-        Collect images from all DaemonSets in the cluster.
+        Collect images from DaemonSets.
         
         DaemonSets are top-level controllers. Their Pods will be skipped.
 
@@ -403,12 +428,16 @@ class ImageCollector:
         count = 0
         
         try:
-            daemonsets = apps_v1.list_daemon_set_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                daemonsets = apps_v1.list_namespaced_daemon_set(namespace=self.namespace)
+            else:
+                daemonsets = apps_v1.list_daemon_set_for_all_namespaces()
             
             for ds in daemonsets.items:
                 namespace = ds.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     continue
                 
@@ -446,12 +475,16 @@ class ImageCollector:
         skipped = 0
         
         try:
-            jobs = batch_v1.list_job_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                jobs = batch_v1.list_namespaced_job(namespace=self.namespace)
+            else:
+                jobs = batch_v1.list_job_for_all_namespaces()
             
             for job in jobs.items:
                 namespace = job.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     continue
                 
@@ -481,7 +514,7 @@ class ImageCollector:
 
     def collect_from_cronjobs(self) -> int:
         """
-        Collect images from all CronJobs in the cluster.
+        Collect images from CronJobs.
         
         CronJobs are top-level controllers. Their Jobs and Pods will be skipped.
 
@@ -493,12 +526,16 @@ class ImageCollector:
         count = 0
         
         try:
-            cronjobs = batch_v1.list_cron_job_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                cronjobs = batch_v1.list_namespaced_cron_job(namespace=self.namespace)
+            else:
+                cronjobs = batch_v1.list_cron_job_for_all_namespaces()
             
             for cj in cronjobs.items:
                 namespace = cj.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     continue
                 
@@ -537,12 +574,16 @@ class ImageCollector:
         skipped = 0
         
         try:
-            replicasets = apps_v1.list_replica_set_for_all_namespaces()
+            # Use namespaced or cluster-wide API based on configuration
+            if self.namespace:
+                replicasets = apps_v1.list_namespaced_replica_set(namespace=self.namespace)
+            else:
+                replicasets = apps_v1.list_replica_set_for_all_namespaces()
             
             for rs in replicasets.items:
                 namespace = rs.metadata.namespace
                 
-                # Skip excluded namespaces
+                # Skip excluded namespaces (no-op in single namespace mode)
                 if self._is_namespace_excluded(namespace):
                     continue
                 
@@ -587,7 +628,10 @@ class ImageCollector:
         Returns:
             Total number of containers found.
         """
-        print("\n📦 Collecting container images from cluster...")
+        if self.namespace:
+            print(f"\n📦 Collecting container images from namespace: {self.namespace}")
+        else:
+            print("\n📦 Collecting container images from cluster...")
         print("  (Only top-level controllers are reported, child objects are skipped)")
         if self.exclude_patterns:
             print(f"  (Excluding namespaces matching: {', '.join(self.exclude_patterns)})")

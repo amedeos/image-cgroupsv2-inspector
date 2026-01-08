@@ -127,13 +127,22 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "-n", "--namespace",
+        dest="namespace",
+        type=str,
+        help="Only inspect images in the specified namespace. "
+             "If not provided, all namespaces are inspected (except those excluded by --exclude-namespaces)."
+    )
+
+    parser.add_argument(
         "--exclude-namespaces",
         dest="exclude_namespaces",
         type=str,
         default="openshift-*,kube-*",
         help="Comma-separated list of namespace patterns to exclude. "
              "Supports glob patterns with * (e.g., 'openshift-*,kube-*'). "
-             "Default: 'openshift-*,kube-*'"
+             "Default: 'openshift-*,kube-*'. "
+             "Ignored when --namespace is specified."
     )
 
     parser.add_argument(
@@ -241,14 +250,20 @@ def main() -> int:
         return 1
     
     try:
-        # Parse namespace exclusion patterns
-        exclude_patterns = None
-        if args.exclude_namespaces:
-            exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
-            print(f"\n📋 Namespace exclusion patterns: {', '.join(exclude_patterns)}")
+        # Handle namespace filtering
+        if args.namespace:
+            # Single namespace mode - ignore exclusion patterns
+            print(f"\n📋 Inspecting single namespace: {args.namespace}")
+            collector = ImageCollector(client, namespace=args.namespace)
+        else:
+            # All namespaces mode - apply exclusion patterns
+            exclude_patterns = None
+            if args.exclude_namespaces:
+                exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
+                print(f"\n📋 Namespace exclusion patterns: {', '.join(exclude_patterns)}")
+            collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
         
         # Collect images
-        collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
         total = collector.collect_all()
         
         if total == 0:
