@@ -94,8 +94,9 @@ class ImageAnalyzer:
     
     # Paths to exclude (not real binaries)
     EXCLUDE_PATHS = [
-        '/var/lib/alternatives/',  # Linux alternatives system config files
-        '/etc/alternatives/',      # Alternative symlinks config
+        '/var/lib/alternatives/',       # Linux alternatives system config files
+        '/var/lib/dpkg/alternatives/',  # Debian/Ubuntu dpkg alternatives
+        '/etc/alternatives/',           # Alternative symlinks config
     ]
     
     # Version parsing patterns
