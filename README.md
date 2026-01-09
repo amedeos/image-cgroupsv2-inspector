@@ -24,6 +24,14 @@ This tool connects to an OpenShift cluster, collects information about all conta
 - 📁 Create rootfs directory with proper extended ACLs
 - ✅ System checks: verify podman installation and disk space (min 20GB)
 
+## ⚠️ Important Prerequisites
+
+> **Warning**: This tool requires the following conditions to work properly:
+>
+> 1. **Registry Accessibility**: All container registries used by the cluster must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registries.
+>
+> 2. **Pull Secret Configuration**: The cluster's pull-secret (downloaded automatically or provided via `--pull-secret`) must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images.
+
 ## Requirements
 
 ### System Requirements
