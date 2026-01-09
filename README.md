@@ -249,6 +249,18 @@ The tool generates a CSV file in the `output` directory with the following colum
 | `node_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
 | `analysis_error` | Error message if analysis failed |
 
+### Identifying Incompatible Images
+
+The fields that indicate cgroups v2 incompatibility are:
+
+- **`java_cgroup_v2_compatible`**: If set to **"No"**, the Java runtime in the image is NOT compatible with cgroup v2
+- **`node_cgroup_v2_compatible`**: If set to **"No"**, the Node.js runtime in the image is NOT compatible with cgroup v2
+
+Possible values for these fields:
+- `Yes` - The runtime is compatible with cgroup v2
+- `No` - The runtime is **NOT** compatible with cgroup v2 and requires an upgrade
+- `N/A` - The runtime was not found in the image
+
 Example filename: `mycluster-20241222-143052.csv`
 
 ## RootFS Directory
