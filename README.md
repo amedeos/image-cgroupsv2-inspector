@@ -24,6 +24,15 @@ This tool connects to an OpenShift cluster, collects information about all conta
 - 📁 Create rootfs directory with proper extended ACLs
 - ✅ System checks: verify podman installation and disk space (min 20GB)
 
+## ⚠️ Disclaimer
+
+> **Warning**: This software is provided **"AS-IS"** without any warranties or guarantees of any kind. No QA or formal testing process has been performed.
+>
+> By using this tool, you acknowledge that:
+> - You are solely responsible for verifying and validating its functionality
+> - You should **test it in a non-production environment first** before using it on production clusters
+> - The authors are not liable for any damages or issues arising from its use
+
 ## ⚠️ Important Prerequisites
 
 > **Warning**: This tool requires the following conditions to work properly:
