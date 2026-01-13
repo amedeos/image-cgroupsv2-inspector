@@ -117,12 +117,37 @@ class ImageAnalyzer:
     NODE_BINARY_PATTERN = re.compile(r'.*/node$')
     DOTNET_BINARY_PATTERN = re.compile(r'.*/dotnet$')
     
-    # Paths to exclude (not real binaries)
-    EXCLUDE_PATHS = [
+    # Paths to exclude - patterns that path must NOT start with
+    EXCLUDE_PATH_PREFIXES = [
         '/var/lib/alternatives/',       # Linux alternatives system config files
         '/var/lib/dpkg/alternatives/',  # Debian/Ubuntu dpkg alternatives
         '/etc/alternatives/',           # Alternative symlinks config
+        '/usr/share/bash-completion/',  # Bash completion scripts (not binaries)
+        '/etc/bash_completion.d/',      # Bash completion scripts (not binaries)
     ]
+    
+    # Paths to exclude - patterns that path must NOT contain
+    EXCLUDE_PATH_CONTAINS = [
+        '/.dotnet/optimizationdata/',   # .NET optimization data files (not binaries)
+    ]
+    
+    def _is_excluded_path(self, path: str) -> bool:
+        """
+        Check if a path should be excluded from analysis.
+        
+        Args:
+            path: Container path to check
+            
+        Returns:
+            True if path should be excluded
+        """
+        # Check prefix exclusions
+        if any(path.startswith(excl) for excl in self.EXCLUDE_PATH_PREFIXES):
+            return True
+        # Check contains exclusions
+        if any(excl in path for excl in self.EXCLUDE_PATH_CONTAINS):
+            return True
+        return False
     
     # Version parsing patterns
     JAVA_VERSION_PATTERN = re.compile(
@@ -858,7 +883,7 @@ class ImageAnalyzer:
                 container_path = f"/{rel_path}"
                 
                 # Skip paths that are not real binaries
-                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                if self._is_excluded_path(container_path):
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
@@ -894,7 +919,7 @@ class ImageAnalyzer:
                 container_path = f"/{rel_path}"
                 
                 # Skip paths that are not real binaries
-                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                if self._is_excluded_path(container_path):
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
@@ -930,7 +955,7 @@ class ImageAnalyzer:
                 container_path = f"/{rel_path}"
                 
                 # Skip paths that are not real binaries
-                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                if self._is_excluded_path(container_path):
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
