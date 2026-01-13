@@ -56,6 +56,9 @@ class ContainerImageInfo:
         self.node_binary: str = ""
         self.node_version: str = ""
         self.node_compatible: str = ""
+        self.dotnet_binary: str = ""
+        self.dotnet_version: str = ""
+        self.dotnet_compatible: str = ""
         self.analysis_error: str = ""
 
     def to_dict(self) -> Dict[str, str]:
@@ -73,6 +76,9 @@ class ContainerImageInfo:
             "node_binary": self.node_binary,
             "node_version": self.node_version,
             "node_cgroup_v2_compatible": self.node_compatible,
+            "dotnet_binary": self.dotnet_binary,
+            "dotnet_version": self.dotnet_version,
+            "dotnet_cgroup_v2_compatible": self.dotnet_compatible,
             "analysis_error": self.analysis_error
         }
 
@@ -671,6 +677,7 @@ class ImageCollector:
             "image_name", "image_id",
             "java_binary", "java_version", "java_cgroup_v2_compatible",
             "node_binary", "node_version", "node_cgroup_v2_compatible",
+            "dotnet_binary", "dotnet_version", "dotnet_cgroup_v2_compatible",
             "analysis_error"
         ]
         
@@ -726,7 +733,7 @@ class ImageCollector:
         output_dir: str = "output"
     ) -> tuple:
         """
-        Analyze all collected images for Java and NodeJS binaries.
+        Analyze all collected images for Java, NodeJS, and .NET binaries.
         
         This method:
         1. Gets unique images to avoid re-analyzing the same image
@@ -745,7 +752,7 @@ class ImageCollector:
         Returns:
             Tuple of (number of images analyzed, CSV filepath or None)
         """
-        print("\n🔬 Analyzing images for Java and NodeJS binaries...")
+        print("\n🔬 Analyzing images for Java, NodeJS, and .NET binaries...")
         print("  (Each image will be pulled, analyzed, and cleaned up)")
         if cluster_name:
             print("  (CSV will be saved after each image for resumability)")
@@ -808,6 +815,9 @@ class ImageCollector:
                     img.node_binary = result.node_found
                     img.node_version = result.node_versions
                     img.node_compatible = result.node_compatible
+                    img.dotnet_binary = result.dotnet_found
+                    img.dotnet_version = result.dotnet_versions
+                    img.dotnet_compatible = result.dotnet_compatible
                     img.analysis_error = result.error or ""
             
             # Save CSV after each image analysis (only analyzed images for efficiency)

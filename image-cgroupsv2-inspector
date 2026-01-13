@@ -115,7 +115,7 @@ The tool will save credentials to .env file after successful connection.
         dest="analyze",
         action="store_true",
         default=False,
-        help="Analyze images for Java/NodeJS binaries (requires --rootfs-path)"
+        help="Analyze images for Java/NodeJS/.NET binaries (requires --rootfs-path)"
     )
 
     parser.add_argument(
@@ -317,10 +317,13 @@ def main() -> int:
         if args.analyze:
             java_found = df[df['java_binary'] != 'None']['java_binary'].count()
             node_found = df[df['node_binary'] != 'None']['node_binary'].count()
+            dotnet_found = df[df['dotnet_binary'] != 'None']['dotnet_binary'].count()
             java_compat = df[df['java_cgroup_v2_compatible'] == 'Yes'].shape[0]
             java_incompat = df[df['java_cgroup_v2_compatible'] == 'No'].shape[0]
             node_compat = df[df['node_cgroup_v2_compatible'] == 'Yes'].shape[0]
             node_incompat = df[df['node_cgroup_v2_compatible'] == 'No'].shape[0]
+            dotnet_compat = df[df['dotnet_cgroup_v2_compatible'] == 'Yes'].shape[0]
+            dotnet_incompat = df[df['dotnet_cgroup_v2_compatible'] == 'No'].shape[0]
             
             print(f"\n   🔬 Analysis Results:")
             print(f"      Java found in: {java_found} containers")
@@ -331,6 +334,10 @@ def main() -> int:
             if node_found > 0:
                 print(f"        ✓ cgroup v2 compatible: {node_compat}")
                 print(f"        ✗ cgroup v2 incompatible: {node_incompat}")
+            print(f"      .NET found in: {dotnet_found} containers")
+            if dotnet_found > 0:
+                print(f"        ✓ cgroup v2 compatible: {dotnet_compat}")
+                print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
         
         print(f"\n   Output file: {csv_path}")
         
