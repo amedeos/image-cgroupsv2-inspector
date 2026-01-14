@@ -46,6 +46,27 @@ This tool connects to an OpenShift cluster, collects information about all conta
 ### System Requirements
 
 - **Python 3.12+**
+  ```bash
+  # RHEL 9.x / Rocky Linux 9 / AlmaLinux 9
+  sudo dnf install python3.12
+  
+  # Fedora 39+
+  sudo dnf install python3.12
+  
+  # Ubuntu 24.04+
+  sudo apt install python3.12 python3.12-venv
+  
+  # Ubuntu 22.04 / Debian 12 (via deadsnakes PPA for Ubuntu)
+  sudo add-apt-repository ppa:deadsnakes/ppa
+  sudo apt update
+  sudo apt install python3.12 python3.12-venv
+  
+  # Gentoo
+  sudo emerge dev-lang/python:3.12
+  
+  # macOS (via Homebrew)
+  brew install python@3.12
+  ```
 - **podman** - Container runtime for image inspection
   ```bash
   # Fedora/RHEL/CentOS
