@@ -39,7 +39,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 >
 > 1. **Registry Accessibility**: All container registries used by the cluster must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registries.
 >
-> 2. **Pull Secret Configuration**: The cluster's pull-secret (downloaded automatically or provided via `--pull-secret`) must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images.
+> 2. **Pull Secret Configuration**: The cluster's pull-secret (downloaded automatically or provided via `--pull-secret`) must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can also provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option.
 
 ## Requirements
 
