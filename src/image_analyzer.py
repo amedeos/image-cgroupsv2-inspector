@@ -1,12 +1,13 @@
 """
 Image Analyzer Module
-Analyzes container images for Java and NodeJS binaries to check cgroup v2 compatibility.
+Analyzes container images for Java, NodeJS, and .NET binaries to check cgroup v2 compatibility.
 
 Supported runtimes and minimum versions for cgroup v2:
 - OpenJDK / HotSpot: jdk8u372, 11.0.16, 15 and later
 - NodeJs: 20.3.0 or later
 - IBM Semeru Runtimes: jdk8u345-b01, 11.0.16.0, 17.0.4.0, 18.0.2.0 and later
 - IBM SDK Java Technology Edition (IBM Java): 8.0.7.15 and later
+- .NET: 5.0 and later
 """
 
 import json
@@ -36,6 +37,7 @@ class ImageAnalysisResult:
     image_id: str
     java_binaries: List[BinaryInfo] = field(default_factory=list)
     node_binaries: List[BinaryInfo] = field(default_factory=list)
+    dotnet_binaries: List[BinaryInfo] = field(default_factory=list)
     error: Optional[str] = None
     
     @property
@@ -81,23 +83,71 @@ class ImageAnalysisResult:
             return "N/A"
         compatible = all(b.is_compatible for b in self.node_binaries)
         return "Yes" if compatible else "No"
+    
+    @property
+    def dotnet_found(self) -> str:
+        """Return comma-separated list of .NET binaries found."""
+        if not self.dotnet_binaries:
+            return "None"
+        return "; ".join([b.path for b in self.dotnet_binaries])
+    
+    @property
+    def dotnet_versions(self) -> str:
+        """Return comma-separated list of .NET versions."""
+        if not self.dotnet_binaries:
+            return "None"
+        return "; ".join([b.version for b in self.dotnet_binaries])
+    
+    @property
+    def dotnet_compatible(self) -> str:
+        """Return compatibility status for .NET."""
+        if not self.dotnet_binaries:
+            return "N/A"
+        compatible = all(b.is_compatible for b in self.dotnet_binaries)
+        return "Yes" if compatible else "No"
 
 
 class ImageAnalyzer:
     """
-    Analyzes container images for Java and NodeJS binaries.
+    Analyzes container images for Java, NodeJS, and .NET binaries.
     """
     
     # Patterns to find binaries
     JAVA_BINARY_PATTERN = re.compile(r'.*/java$')
     NODE_BINARY_PATTERN = re.compile(r'.*/node$')
+    DOTNET_BINARY_PATTERN = re.compile(r'.*/dotnet$')
     
-    # Paths to exclude (not real binaries)
-    EXCLUDE_PATHS = [
+    # Paths to exclude - patterns that path must NOT start with
+    EXCLUDE_PATH_PREFIXES = [
         '/var/lib/alternatives/',       # Linux alternatives system config files
         '/var/lib/dpkg/alternatives/',  # Debian/Ubuntu dpkg alternatives
         '/etc/alternatives/',           # Alternative symlinks config
+        '/usr/share/bash-completion/',  # Bash completion scripts (not binaries)
+        '/etc/bash_completion.d/',      # Bash completion scripts (not binaries)
     ]
+    
+    # Paths to exclude - patterns that path must NOT contain
+    EXCLUDE_PATH_CONTAINS = [
+        '/.dotnet/optimizationdata/',   # .NET optimization data files (not binaries)
+    ]
+    
+    def _is_excluded_path(self, path: str) -> bool:
+        """
+        Check if a path should be excluded from analysis.
+        
+        Args:
+            path: Container path to check
+            
+        Returns:
+            True if path should be excluded
+        """
+        # Check prefix exclusions
+        if any(path.startswith(excl) for excl in self.EXCLUDE_PATH_PREFIXES):
+            return True
+        # Check contains exclusions
+        if any(excl in path for excl in self.EXCLUDE_PATH_CONTAINS):
+            return True
+        return False
     
     # Version parsing patterns
     JAVA_VERSION_PATTERN = re.compile(
@@ -109,6 +159,8 @@ class ImageAnalyzer:
         re.IGNORECASE
     )
     NODE_VERSION_PATTERN = re.compile(r'v?(\d+\.\d+\.\d+)')
+    # .NET version pattern - matches output like "8.0.122" or "3.0.100"
+    DOTNET_VERSION_PATTERN = re.compile(r'^(\d+\.\d+\.\d+)', re.MULTILINE)
     
     # IBM patterns
     IBM_SEMERU_PATTERN = re.compile(r'IBM Semeru', re.IGNORECASE)
@@ -635,6 +687,78 @@ class ImageAnalyzer:
         except Exception:
             return False
     
+    def _get_dotnet_version_in_container(self, image_name: str, binary_path: str, debug: bool = False) -> Tuple[str, str]:
+        """
+        Get .NET version by running the binary inside the container.
+        
+        Args:
+            image_name: Container image name
+            binary_path: Path to dotnet binary inside the container
+            debug: Enable debug output
+            
+        Returns:
+            Tuple of (version, full_output)
+        """
+        # Use --entrypoint to override any ENTRYPOINT in the image
+        # Additional options handle permission issues with non-root user images
+        exit_code, stdout, stderr = self._run_command(
+            [
+                "podman", "run", "--rm",
+                "--entrypoint", binary_path,
+                "--privileged",
+                "--security-opt=no-new-privileges",
+                "--cap-drop=all",
+                "--cap-add=chown",
+                "--cap-add=dac_override",
+                "--cap-add=fowner",
+                "--cap-add=setuid",
+                "--cap-add=setgid",
+                "--user", "0:0",
+                "--env", "GUID=0",
+                "--env", "PUID=0",
+                image_name,
+                "--version"
+            ],
+            timeout=60,
+            debug=debug
+        )
+        
+        output = stdout + stderr
+        
+        match = self.DOTNET_VERSION_PATTERN.search(output)
+        if match:
+            return match.group(1), output
+        
+        return "unknown", output
+    
+    def _check_dotnet_compatibility(self, version: str) -> bool:
+        """
+        Check if .NET version is compatible with cgroup v2.
+        
+        Minimum version: 5.0
+        .NET 5.0 and later have full cgroups v2 support.
+        .NET Core 3.x and earlier do NOT support cgroups v2.
+        
+        Args:
+            version: .NET version string (e.g., "8.0.122", "3.0.100")
+            
+        Returns:
+            True if compatible (version >= 5.0)
+        """
+        try:
+            parts = [int(p) for p in version.split(".")]
+            
+            if len(parts) < 2:
+                return False
+            
+            major = parts[0]
+            
+            # .NET 5.0+ is compatible with cgroups v2
+            return major >= 5
+            
+        except Exception:
+            return False
+    
     def _cleanup(self, image_name: str, keep_image: bool = False, debug: bool = False) -> None:
         """
         Clean up rootfs and optionally remove the image.
@@ -759,7 +883,7 @@ class ImageAnalyzer:
                 container_path = f"/{rel_path}"
                 
                 # Skip paths that are not real binaries
-                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                if self._is_excluded_path(container_path):
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
@@ -795,7 +919,7 @@ class ImageAnalyzer:
                 container_path = f"/{rel_path}"
                 
                 # Skip paths that are not real binaries
-                if any(container_path.startswith(excl) for excl in self.EXCLUDE_PATHS):
+                if self._is_excluded_path(container_path):
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
@@ -820,6 +944,42 @@ class ImageAnalyzer:
                     runtime_type="NodeJS"
                 ))
             
+            # Find .NET binaries
+            print(f"    Searching for .NET binaries...")
+            dotnet_paths = self._find_binaries(extract_path, self.DOTNET_BINARY_PATTERN)
+            
+            # Deduplicate - only check unique binaries
+            dotnet_checked = set()
+            for dotnet_path in dotnet_paths:
+                rel_path = os.path.relpath(dotnet_path, extract_path)
+                container_path = f"/{rel_path}"
+                
+                # Skip paths that are not real binaries
+                if self._is_excluded_path(container_path):
+                    if debug:
+                        print(f"      [DEBUG] Skipping excluded path: {container_path}")
+                    continue
+                
+                # Skip if we already checked a binary with this resolved path
+                resolved = os.path.realpath(dotnet_path)
+                if resolved in dotnet_checked:
+                    continue
+                dotnet_checked.add(resolved)
+                
+                # Run version check inside container
+                version, output = self._get_dotnet_version_in_container(
+                    image_name, container_path, debug=debug
+                )
+                is_compatible = self._check_dotnet_compatibility(version)
+                
+                result.dotnet_binaries.append(BinaryInfo(
+                    path=container_path,
+                    version=version,
+                    version_output=output,
+                    is_compatible=is_compatible,
+                    runtime_type=".NET"
+                ))
+            
             # Report findings
             if result.java_binaries:
                 for b in result.java_binaries:
@@ -831,8 +991,13 @@ class ImageAnalyzer:
                     compat = "✓" if b.is_compatible else "✗"
                     print(f"      {compat} Node.js: {b.version} at {b.path}")
             
-            if not result.java_binaries and not result.node_binaries:
-                print(f"      No Java or Node.js binaries found")
+            if result.dotnet_binaries:
+                for b in result.dotnet_binaries:
+                    compat = "✓" if b.is_compatible else "✗"
+                    print(f"      {compat} .NET: {b.version} at {b.path}")
+            
+            if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
+                print(f"      No Java, Node.js, or .NET binaries found")
             
         except Exception as e:
             result.error = str(e)

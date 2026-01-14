@@ -1,6 +1,10 @@
 # Output directory
 output/
 
+# Log files
+*.log
+image-cgroupsv2-inspector.log
+
 # Python virtual environment
 venv/
 .venv/
