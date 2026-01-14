@@ -159,8 +159,9 @@ class ImageAnalyzer:
         re.IGNORECASE
     )
     NODE_VERSION_PATTERN = re.compile(r'v?(\d+\.\d+\.\d+)')
-    # .NET version pattern - matches output like "8.0.122" or "3.0.100"
-    DOTNET_VERSION_PATTERN = re.compile(r'^(\d+\.\d+\.\d+)', re.MULTILINE)
+    # .NET version pattern - matches output from "dotnet --list-runtimes"
+    # Example: "Microsoft.NETCore.App 8.0.12 [/usr/share/dotnet/shared/Microsoft.NETCore.App]"
+    DOTNET_VERSION_PATTERN = re.compile(r'Microsoft\.NETCore\.App\s+(\d+\.\d+\.\d+)')
     
     # IBM patterns
     IBM_SEMERU_PATTERN = re.compile(r'IBM Semeru', re.IGNORECASE)
@@ -691,6 +692,10 @@ class ImageAnalyzer:
         """
         Get .NET version by running the binary inside the container.
         
+        Uses --list-runtimes instead of --version because:
+        - Runtime-only images (without SDK) don't support --version
+        - --list-runtimes works with both SDK and runtime-only images
+        
         Args:
             image_name: Container image name
             binary_path: Path to dotnet binary inside the container
@@ -701,6 +706,7 @@ class ImageAnalyzer:
         """
         # Use --entrypoint to override any ENTRYPOINT in the image
         # Additional options handle permission issues with non-root user images
+        # Using --list-runtimes because it works with runtime-only images (no SDK)
         exit_code, stdout, stderr = self._run_command(
             [
                 "podman", "run", "--rm",
@@ -717,7 +723,7 @@ class ImageAnalyzer:
                 "--env", "GUID=0",
                 "--env", "PUID=0",
                 image_name,
-                "--version"
+                "--list-runtimes"
             ],
             timeout=60,
             debug=debug
