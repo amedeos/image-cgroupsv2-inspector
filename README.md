@@ -115,7 +115,7 @@ pip install -r requirements.txt
 # Specify rootfs path for image extraction
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images
 
-# Analyze images for Java/NodeJS cgroup v2 compatibility
+# Analyze images for Java/NodeJS/.NET cgroup v2 compatibility
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
 
 # Inspect only a specific namespace
@@ -145,7 +145,7 @@ oc whoami --show-server
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
-| `--analyze` | Analyze images for Java/NodeJS binaries (requires `--rootfs-path`) |
+| `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
 | `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
 | `-v, --verbose` | Enable verbose output |
@@ -209,8 +209,8 @@ When using the `--analyze` flag, the tool:
 
 1. Pulls each unique container image using podman
 2. Exports the container filesystem to a temporary directory
-3. Searches for Java and Node.js binaries
-4. Executes `-version` to determine the exact version
+3. Searches for Java, Node.js, and .NET binaries
+4. Executes `-version` / `--version` to determine the exact version
 5. Checks if the version is compatible with cgroup v2
 6. Cleans up the image and filesystem after each analysis
 
@@ -222,6 +222,7 @@ When using the `--analyze` flag, the tool:
 | IBM Semeru Runtimes | 8u345-b01, 11.0.16.0, 17.0.4.0, 18.0.2.0+ |
 | IBM SDK Java (IBM Java) | 8.0.7.15+ |
 | Node.js | 20.3.0+ |
+| .NET | 5.0+ |
 
 ### Analysis Example
 
@@ -235,6 +236,9 @@ When using the `--analyze` flag, the tool:
 #        ✗ cgroup v2 incompatible: 15
 #      Node.js found in: 12 containers
 #        ✓ cgroup v2 compatible: 10
+#        ✗ cgroup v2 incompatible: 2
+#      .NET found in: 8 containers
+#        ✓ cgroup v2 compatible: 6
 #        ✗ cgroup v2 incompatible: 2
 ```
 
@@ -256,6 +260,9 @@ The tool generates a CSV file in the `output` directory with the following colum
 | `node_binary` | Path to Node.js binary found (or "None") |
 | `node_version` | Node.js version detected |
 | `node_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `dotnet_binary` | Path to .NET binary found (or "None") |
+| `dotnet_version` | .NET version detected |
+| `dotnet_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
 | `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images
@@ -264,6 +271,7 @@ The fields that indicate cgroups v2 incompatibility are:
 
 - **`java_cgroup_v2_compatible`**: If set to **"No"**, the Java runtime in the image is NOT compatible with cgroup v2
 - **`node_cgroup_v2_compatible`**: If set to **"No"**, the Node.js runtime in the image is NOT compatible with cgroup v2
+- **`dotnet_cgroup_v2_compatible`**: If set to **"No"**, the .NET runtime in the image is NOT compatible with cgroup v2
 
 Possible values for these fields:
 - `Yes` - The runtime is compatible with cgroup v2
@@ -303,10 +311,13 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 |------|-------------|
 | `namespace-java.yaml` | Namespace `test-java` for Java test deployments |
 | `namespace-node.yaml` | Namespace `test-node` for Node.js test deployments |
+| `namespace-dotnet.yaml` | Namespace `test-dotnet` for .NET test deployments |
 | `deployment-java-compatible.yaml` | Deployment with OpenJDK 17 (cgroups v2 compatible) |
 | `deployment-java-incompatible.yaml` | Deployment with OpenJDK 8u362 (cgroups v2 **incompatible**) |
 | `deployment-node-compatible.yaml` | Deployment with Node.js 20 (cgroups v2 compatible) |
 | `deployment-node-incompatible.yaml` | Deployment with Node.js 18 (cgroups v2 **incompatible**) |
+| `deployment-dotnet-compatible.yaml` | Deployment with .NET 8.0 (cgroups v2 compatible) |
+| `deployment-dotnet-incompatible.yaml` | Deployment with .NET Core 3.0 (cgroups v2 **incompatible**) |
 
 ### Deploying Test Resources
 
@@ -321,9 +332,15 @@ oc apply -f test/namespace-node.yaml
 oc apply -f test/deployment-node-compatible.yaml
 oc apply -f test/deployment-node-incompatible.yaml
 
+# Deploy .NET test resources
+oc apply -f test/namespace-dotnet.yaml
+oc apply -f test/deployment-dotnet-compatible.yaml
+oc apply -f test/deployment-dotnet-incompatible.yaml
+
 # Verify pods are running
 oc get pods -n test-java
 oc get pods -n test-node
+oc get pods -n test-dotnet
 ```
 
 ### Running Analysis on Test Resources
@@ -342,7 +359,7 @@ oc get pods -n test-node
 ### Cleanup
 
 ```bash
-oc delete namespace test-java test-node
+oc delete namespace test-java test-node test-dotnet
 ```
 
 ## Project Structure
@@ -368,10 +385,13 @@ image-cgroupsv2-inspector/
 └── test/                     # Test Kubernetes manifests
     ├── namespace-java.yaml
     ├── namespace-node.yaml
+    ├── namespace-dotnet.yaml
     ├── deployment-java-compatible.yaml
     ├── deployment-java-incompatible.yaml
     ├── deployment-node-compatible.yaml
-    └── deployment-node-incompatible.yaml
+    ├── deployment-node-incompatible.yaml
+    ├── deployment-dotnet-compatible.yaml
+    └── deployment-dotnet-incompatible.yaml
 ```
 
 ## Contributing
