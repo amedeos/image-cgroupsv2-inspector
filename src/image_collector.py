@@ -16,6 +16,7 @@ Only the highest-level controller is included in the output.
 """
 
 import fnmatch
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Set
@@ -730,7 +731,8 @@ class ImageCollector:
         pull_secret_path: Optional[str] = None,
         debug: bool = False,
         cluster_name: Optional[str] = None,
-        output_dir: str = "output"
+        output_dir: str = "output",
+        logger: Optional[logging.Logger] = None
     ) -> tuple:
         """
         Analyze all collected images for Java, NodeJS, and .NET binaries.
@@ -748,6 +750,7 @@ class ImageCollector:
             debug: Enable debug output
             cluster_name: Cluster name for CSV filename (if provided, saves after each image)
             output_dir: Directory to save CSV output
+            logger: Optional logger instance for file logging
             
         Returns:
             Tuple of (number of images analyzed, CSV filepath or None)
@@ -756,6 +759,9 @@ class ImageCollector:
         print("  (Each image will be pulled, analyzed, and cleaned up)")
         if cluster_name:
             print("  (CSV will be saved after each image for resumability)")
+        
+        if logger:
+            logger.info("Starting image analysis for Java, NodeJS, and .NET binaries")
         
         # Create analyzer
         analyzer = ImageAnalyzer(rootfs_path, pull_secret_path)
@@ -787,17 +793,26 @@ class ImageCollector:
         
         for idx, image_name in enumerate(unique_images, 1):
             print(f"\n  [{idx}/{len(unique_images)}] Analyzing: {image_name[:70]}...")
+            if logger:
+                logger.info(f"[{idx}/{len(unique_images)}] Analyzing image: {image_name}")
             
             try:
                 result = analyzer.analyze_image(image_name, debug=debug)
                 results_cache[image_name] = result
                 analyzed_count += 1
                 
+                if logger:
+                    logger.info(f"  Image analysis completed: java={result.java_found}, node={result.node_found}, dotnet={result.dotnet_found}")
+                
             except Exception as e:
                 print(f"    Error analyzing image: {e}")
+                if logger:
+                    logger.error(f"  Error analyzing image {image_name}: {e}")
                 import traceback
                 if debug:
                     traceback.print_exc()
+                    if logger:
+                        logger.exception(f"  Full traceback for {image_name}:")
                 # Create error result
                 results_cache[image_name] = ImageAnalysisResult(
                     image_name=image_name,
@@ -830,12 +845,16 @@ class ImageCollector:
                 print(f"    💾 Progress saved: {len(df_analyzed)} rows ({idx}/{len(unique_images)} images)")
         
         print(f"\n✓ Analyzed {analyzed_count} unique images")
+        if logger:
+            logger.info(f"Image analysis completed: {analyzed_count} unique images analyzed")
         
         # Final save with ALL rows (now all images are analyzed)
         if csv_filepath:
             df = self.to_dataframe()
             df.to_csv(csv_filepath, index=False)
             print(f"  Final CSV saved to: {csv_filepath} ({len(df)} rows)")
+            if logger:
+                logger.info(f"Final CSV saved to: {csv_filepath} ({len(df)} rows)")
         
         return analyzed_count, str(csv_filepath) if csv_filepath else None
 

@@ -20,6 +20,7 @@ License: See LICENSE file
 import argparse
 import sys
 import os
+import logging
 from pathlib import Path
 
 # Add src directory to path
@@ -154,12 +155,60 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--log-to-file",
+        dest="log_to_file",
+        action="store_true",
+        default=False,
+        help="Enable logging to file"
+    )
+
+    parser.add_argument(
+        "--log-file",
+        dest="log_file",
+        type=str,
+        default="image-cgroupsv2-inspector.log",
+        help="Path to log file (default: image-cgroupsv2-inspector.log). Implies --log-to-file"
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version="%(prog)s 1.0.0"
     )
 
     return parser.parse_args()
+
+
+def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Logger:
+    """
+    Set up logging configuration.
+    
+    Args:
+        log_to_file: Whether to enable file logging.
+        log_file: Path to the log file.
+        verbose: Whether to enable verbose (DEBUG) logging.
+    
+    Returns:
+        Configured logger instance.
+    """
+    logger = logging.getLogger("image-cgroupsv2-inspector")
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    
+    # Log format
+    log_format = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    
+    if log_to_file:
+        # File handler
+        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
+        file_handler.setFormatter(log_format)
+        logger.addHandler(file_handler)
+        print(f"📝 Logging to file: {log_file}")
+    
+    return logger
 
 
 def print_banner():
@@ -173,17 +222,20 @@ def print_banner():
     print(banner)
 
 
-def setup_rootfs(rootfs_path: str) -> bool:
+def setup_rootfs(rootfs_path: str, logger: logging.Logger = None) -> bool:
     """
     Set up the rootfs directory with proper permissions and ACLs.
 
     Args:
         rootfs_path: Path where rootfs directory will be created.
+        logger: Logger instance for file logging.
 
     Returns:
         True if successful, False otherwise.
     """
     print(f"\n🔧 Setting up rootfs directory at: {rootfs_path}")
+    if logger:
+        logger.info(f"Setting up rootfs directory at: {rootfs_path}")
     
     manager = RootFSManager(rootfs_path)
     
@@ -191,9 +243,13 @@ def setup_rootfs(rootfs_path: str) -> bool:
     success, msg = manager.create_rootfs_directory()
     if not success:
         print(f"✗ Failed to create rootfs: {msg}")
+        if logger:
+            logger.error(f"Failed to create rootfs: {msg}")
         return False
     
     print(f"\n✓ {msg}")
+    if logger:
+        logger.info(f"Rootfs setup successful: {msg}")
     return True
 
 
@@ -207,22 +263,42 @@ def main() -> int:
     # Change to script directory for relative paths
     os.chdir(script_dir)
     
+    # Set up logging
+    # If --log-file is specified with a non-default value, imply --log-to-file
+    log_to_file = args.log_to_file or args.log_file != "image-cgroupsv2-inspector.log"
+    logger = setup_logging(log_to_file, args.log_file, args.verbose)
+    
+    if log_to_file:
+        logger.info("=" * 60)
+        logger.info("image-cgroupsv2-inspector started")
+        logger.info("=" * 60)
+    
     # Run system checks (podman, etc.)
+    if log_to_file:
+        logger.info("Running system checks...")
     if not run_system_checks(verbose=args.verbose):
         print("\n✗ System checks failed. Please install the required dependencies.")
+        if log_to_file:
+            logger.error("System checks failed")
         return 1
+    if log_to_file:
+        logger.info("System checks passed")
     
     # Handle rootfs path if provided
     if args.rootfs_path:
-        if not setup_rootfs(args.rootfs_path):
+        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None):
             return 1
         
         if args.skip_collection:
             print("\n✓ Rootfs setup complete. Skipping image collection.")
+            if log_to_file:
+                logger.info("Rootfs setup complete. Skipping image collection.")
             return 0
     
     # Create OpenShift client
     try:
+        if log_to_file:
+            logger.info("Creating OpenShift client...")
         client = OpenShiftClient(
             api_url=args.api_url,
             token=args.token,
@@ -236,17 +312,27 @@ def main() -> int:
             print("  Please provide --api-url and --token, or set them in .env file.")
             print("\n  To get a token, run: oc whoami -t")
             print("  To get the API URL, run: oc whoami --show-server")
+            if log_to_file:
+                logger.error("OpenShift credentials not provided")
             return 1
         
         # Connect to the cluster
         print("\n🔌 Connecting to OpenShift cluster...")
+        if log_to_file:
+            logger.info(f"Connecting to OpenShift cluster at {client.api_url}")
         client.connect()
+        if log_to_file:
+            logger.info(f"Connected successfully to cluster: {client.cluster_name}")
         
     except ValueError as e:
         print(f"\n✗ Configuration error: {e}")
+        if log_to_file:
+            logger.error(f"Configuration error: {e}")
         return 1
     except Exception as e:
         print(f"\n✗ Connection error: {e}")
+        if log_to_file:
+            logger.error(f"Connection error: {e}")
         return 1
     
     try:
@@ -254,6 +340,8 @@ def main() -> int:
         if args.namespace:
             # Single namespace mode - ignore exclusion patterns
             print(f"\n📋 Inspecting single namespace: {args.namespace}")
+            if log_to_file:
+                logger.info(f"Inspecting single namespace: {args.namespace}")
             collector = ImageCollector(client, namespace=args.namespace)
         else:
             # All namespaces mode - apply exclusion patterns
@@ -261,19 +349,29 @@ def main() -> int:
             if args.exclude_namespaces:
                 exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
                 print(f"\n📋 Namespace exclusion patterns: {', '.join(exclude_patterns)}")
+                if log_to_file:
+                    logger.info(f"Namespace exclusion patterns: {', '.join(exclude_patterns)}")
             collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
         
         # Collect images
+        if log_to_file:
+            logger.info("Collecting container images from cluster...")
         total = collector.collect_all()
+        if log_to_file:
+            logger.info(f"Collected {total} containers")
         
         if total == 0:
             print("\n⚠ No containers found in the cluster.")
+            if log_to_file:
+                logger.warning("No containers found in the cluster")
             return 0
         
         # Analyze images if requested
         if args.analyze:
             if not args.rootfs_path:
                 print("\n✗ Error: --analyze requires --rootfs-path to be specified.")
+                if log_to_file:
+                    logger.error("--analyze requires --rootfs-path to be specified")
                 return 1
             
             # Check if pull-secret exists
@@ -281,27 +379,38 @@ def main() -> int:
             if args.pull_secret and Path(args.pull_secret).exists():
                 pull_secret_path = args.pull_secret
                 print(f"\n🔑 Using pull-secret: {pull_secret_path}")
+                if log_to_file:
+                    logger.info(f"Using pull-secret: {pull_secret_path}")
             else:
                 print("\n⚠ Warning: No pull-secret found. Some images may fail to pull.")
+                if log_to_file:
+                    logger.warning("No pull-secret found. Some images may fail to pull.")
             
             # Get the rootfs path
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
             
             # Analyze images (saves CSV after each image for resumability)
+            if log_to_file:
+                logger.info("Starting image analysis...")
             _, csv_path = collector.analyze_images(
                 rootfs_path, 
                 pull_secret_path, 
                 debug=args.verbose,
                 cluster_name=client.cluster_name,
-                output_dir=args.output_dir
+                output_dir=args.output_dir,
+                logger=logger if log_to_file else None
             )
+            if log_to_file:
+                logger.info("Image analysis completed")
         else:
             # Save to CSV (only if not analyzing - analysis saves incrementally)
             csv_path = collector.save_to_csv(
                 cluster_name=client.cluster_name,
                 output_dir=args.output_dir
             )
+            if log_to_file:
+                logger.info(f"Results saved to CSV: {csv_path}")
         
         # Show summary
         df = collector.to_dataframe()
@@ -349,14 +458,25 @@ def main() -> int:
         
     except Exception as e:
         print(f"\n✗ Error during collection: {e}")
+        if log_to_file:
+            logger.error(f"Error during collection: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
+            if log_to_file:
+                logger.exception("Full traceback:")
         return 1
     
     finally:
         # Disconnect
         client.disconnect()
+        if log_to_file:
+            logger.info("Disconnected from OpenShift cluster")
+    
+    if log_to_file:
+        logger.info("=" * 60)
+        logger.info("image-cgroupsv2-inspector completed successfully")
+        logger.info("=" * 60)
     
     print("\n✓ Done!")
     return 0

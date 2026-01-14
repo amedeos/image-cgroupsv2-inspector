@@ -148,6 +148,8 @@ oc whoami --show-server
 | `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
 | `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
+| `--log-to-file` | Enable logging to file |
+| `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
 | `-v, --verbose` | Enable verbose output |
 | `--version` | Show version number |
 
