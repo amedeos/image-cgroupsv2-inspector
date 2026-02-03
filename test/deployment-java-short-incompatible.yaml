@@ -28,7 +28,7 @@ spec:
           # Eclipse Temurin 8 - cgroups v2 support was added in 8u372
           # Using older tag without cgroups v2 support
           # (openjdk images were deprecated on Docker Hub)
-          image: eclipse-temurin:8
+          image: eclipse-temurin:8u302-b08-jdk-centos7
           command:
             - /bin/sh
             - -c
