@@ -189,16 +189,91 @@ class ImageCollector:
                 return True
         return False
 
+    def _get_resolved_images_from_pods(
+        self,
+        namespace: str,
+        label_selector: str
+    ) -> Dict[str, str]:
+        """
+        Get resolved images from pods matching the label selector.
+        
+        This is used to get the FQDN-resolved images for controllers like
+        Deployment, StatefulSet, etc. that only have spec definitions.
+        
+        Args:
+            namespace: Namespace to search for pods
+            label_selector: Label selector to find pods (e.g., "app=myapp")
+            
+        Returns:
+            Dict mapping container name to resolved image from pod status
+        """
+        resolved_image_map: Dict[str, str] = {}
+        
+        try:
+            core_v1 = self.client.get_core_v1_api()
+            pods = core_v1.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=label_selector
+            )
+            
+            # Get resolved images from the first running pod
+            for pod in pods.items:
+                if pod.status and pod.status.phase == "Running":
+                    all_statuses = (pod.status.container_statuses or []) + \
+                                   (pod.status.init_container_statuses or [])
+                    for status in all_statuses:
+                        if status.image and status.name not in resolved_image_map:
+                            resolved_image_map[status.name] = status.image
+                    # Found a running pod, use its resolved images
+                    if resolved_image_map:
+                        break
+            
+            # If no running pod found, try any pod with status
+            if not resolved_image_map:
+                for pod in pods.items:
+                    if pod.status:
+                        all_statuses = (pod.status.container_statuses or []) + \
+                                       (pod.status.init_container_statuses or [])
+                        for status in all_statuses:
+                            if status.image and status.name not in resolved_image_map:
+                                resolved_image_map[status.name] = status.image
+                        if resolved_image_map:
+                            break
+                            
+        except Exception as e:
+            logging.debug(f"Could not get resolved images for {namespace}/{label_selector}: {e}")
+        
+        return resolved_image_map
+
+    def _build_label_selector(self, match_labels: Optional[Dict[str, str]]) -> str:
+        """
+        Build a label selector string from match_labels dict.
+        
+        Args:
+            match_labels: Dict of label key-value pairs
+            
+        Returns:
+            Label selector string (e.g., "app=myapp,version=v1")
+        """
+        if not match_labels:
+            return ""
+        return ",".join(f"{k}={v}" for k, v in match_labels.items())
+
     def _add_container_info(
         self,
         containers: List,
         namespace: str,
         object_type: str,
         object_name: str,
-        image_id_map: Optional[Dict[str, str]] = None
+        image_id_map: Optional[Dict[str, str]] = None,
+        resolved_image_map: Optional[Dict[str, str]] = None
     ) -> int:
         """
         Add container information to the images list.
+        
+        If the resolved image (from pod status) differs from the spec image,
+        the resolved image is used. This handles short-name images that get
+        resolved to FQDN by the container runtime.
         
         Args:
             containers: List of container specs
@@ -206,19 +281,34 @@ class ImageCollector:
             object_type: Type of the object
             object_name: Name of the object
             image_id_map: Optional mapping of container name to image ID
+            resolved_image_map: Optional mapping of container name to resolved image
+                               (from pod status.containerStatuses[*].image)
             
         Returns:
             Number of containers added
         """
         count = 0
         image_id_map = image_id_map or {}
+        resolved_image_map = resolved_image_map or {}
         
         for container in containers:
             image_id = image_id_map.get(container.name, "")
+            spec_image = container.image
+            resolved_image = resolved_image_map.get(container.name, "")
+            
+            # Use resolved image if it differs from spec (handles short-name -> FQDN)
+            if resolved_image and resolved_image != spec_image:
+                image_name = resolved_image
+                logging.debug(
+                    f"Using resolved image for {container.name}: "
+                    f"{spec_image} -> {resolved_image}"
+                )
+            else:
+                image_name = spec_image
             
             info = ContainerImageInfo(
                 container_name=container.name,
-                image_name=container.image,
+                image_name=image_name,
                 namespace=namespace,
                 image_id=image_id,
                 object_type=object_type,
@@ -302,21 +392,26 @@ class ImageCollector:
                 init_containers = pod.spec.init_containers or []
                 all_containers = containers + init_containers
                 
-                # Get container statuses for image IDs
+                # Get container statuses for image IDs and resolved images
                 image_id_map: Dict[str, str] = {}
+                resolved_image_map: Dict[str, str] = {}
                 if pod.status:
                     all_statuses = (pod.status.container_statuses or []) + \
                                    (pod.status.init_container_statuses or [])
                     for status in all_statuses:
                         if status.image_id:
                             image_id_map[status.name] = status.image_id
+                        # Get resolved image from status (handles short-name -> FQDN)
+                        if status.image:
+                            resolved_image_map[status.name] = status.image
                 
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "Pod",
                     pod_name,
-                    image_id_map
+                    image_id_map,
+                    resolved_image_map
                 )
                 
         except Exception as e:
@@ -362,11 +457,19 @@ class ImageCollector:
                 init_containers = deployment.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Get resolved images from running pods
+                match_labels = deployment.spec.selector.match_labels or {}
+                label_selector = self._build_label_selector(match_labels)
+                resolved_image_map = self._get_resolved_images_from_pods(
+                    namespace, label_selector
+                ) if label_selector else {}
+                
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "Deployment",
-                    deployment_name
+                    deployment_name,
+                    resolved_image_map=resolved_image_map
                 )
                     
         except Exception as e:
@@ -408,11 +511,19 @@ class ImageCollector:
                 init_containers = sts.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Get resolved images from running pods
+                match_labels = sts.spec.selector.match_labels or {}
+                label_selector = self._build_label_selector(match_labels)
+                resolved_image_map = self._get_resolved_images_from_pods(
+                    namespace, label_selector
+                ) if label_selector else {}
+                
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "StatefulSet",
-                    sts_name
+                    sts_name,
+                    resolved_image_map=resolved_image_map
                 )
                     
         except Exception as e:
@@ -454,11 +565,19 @@ class ImageCollector:
                 init_containers = ds.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Get resolved images from running pods
+                match_labels = ds.spec.selector.match_labels or {}
+                label_selector = self._build_label_selector(match_labels)
+                resolved_image_map = self._get_resolved_images_from_pods(
+                    namespace, label_selector
+                ) if label_selector else {}
+                
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "DaemonSet",
-                    ds_name
+                    ds_name,
+                    resolved_image_map=resolved_image_map
                 )
                     
         except Exception as e:
@@ -506,11 +625,18 @@ class ImageCollector:
                 init_containers = job.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Get resolved images from pods (use job-name label)
+                label_selector = f"job-name={job_name}"
+                resolved_image_map = self._get_resolved_images_from_pods(
+                    namespace, label_selector
+                )
+                
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "Job",
-                    job_name
+                    job_name,
+                    resolved_image_map=resolved_image_map
                 )
                     
         except Exception as e:
@@ -553,6 +679,10 @@ class ImageCollector:
                 init_containers = cj.spec.job_template.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Note: CronJobs are complex (CronJob -> Job -> Pod) and Jobs may be
+                # completed/cleaned up. We use spec image directly here.
+                # If short-name resolution is needed, the image will be resolved
+                # when a Job/Pod is actually running.
                 count += self._add_container_info(
                     all_containers,
                     namespace,
@@ -610,11 +740,19 @@ class ImageCollector:
                 init_containers = rs.spec.template.spec.init_containers or []
                 all_containers = containers + init_containers
                 
+                # Get resolved images from running pods
+                match_labels = rs.spec.selector.match_labels or {} if rs.spec.selector else {}
+                label_selector = self._build_label_selector(match_labels)
+                resolved_image_map = self._get_resolved_images_from_pods(
+                    namespace, label_selector
+                ) if label_selector else {}
+                
                 count += self._add_container_info(
                     all_containers,
                     namespace,
                     "ReplicaSet",
-                    rs_name
+                    rs_name,
+                    resolved_image_map=resolved_image_map
                 )
                     
         except Exception as e:

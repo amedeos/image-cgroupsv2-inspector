@@ -226,6 +226,33 @@ The exclusion patterns support glob-style wildcards:
 - `openshift-*` matches `openshift-etcd`, `openshift-monitoring`, etc.
 - `*-test` matches `app-test`, `service-test`, etc.
 
+## Short-Name Image Resolution
+
+Container images can be specified using short-names (e.g., `eclipse-temurin:17`) or fully qualified domain names (FQDN, e.g., `docker.io/library/eclipse-temurin:17`). When a short-name is used, the container runtime resolves it to an FQDN based on the cluster's `registries.conf` or OpenShift's `image.config.openshift.io` configuration.
+
+### How it Works
+
+The tool automatically resolves short-name images to their FQDN by reading the resolved image from pod status:
+
+| Resource Type | Resolution Method |
+|---------------|-------------------|
+| Pod | Uses `status.containerStatuses[*].image` directly |
+| Deployment | Finds pods via label selector, gets resolved image from pod status |
+| StatefulSet | Finds pods via label selector, gets resolved image from pod status |
+| DaemonSet | Finds pods via label selector, gets resolved image from pod status |
+| ReplicaSet | Finds pods via label selector, gets resolved image from pod status |
+| Job | Finds pods via `job-name` label, gets resolved image from pod status |
+| CronJob | Uses spec image directly (pods may not exist) |
+
+### Why This Matters
+
+If your local host doesn't have the same registry search configuration as the cluster (e.g., `unqualified-search-registries` in `registries.conf`), podman won't be able to pull short-name images. By resolving to FQDN first, the tool ensures images can be pulled and analyzed regardless of local registry configuration.
+
+### Limitations
+
+- **CronJobs**: Since CronJob pods are transient (created when scheduled, then cleaned up), the tool uses the spec image directly. If the CronJob uses a short-name image, it may fail to pull during analysis unless your local registry configuration can resolve it.
+- **Pods not running**: If a controller's pods are not running (e.g., scaled to 0, failed, pending), the resolved image cannot be obtained and the spec image is used.
+
 ## Image Analysis for cgroup v2 Compatibility
 
 When using the `--analyze` flag, the tool:
