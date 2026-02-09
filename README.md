@@ -226,6 +226,33 @@ The exclusion patterns support glob-style wildcards:
 - `openshift-*` matches `openshift-etcd`, `openshift-monitoring`, etc.
 - `*-test` matches `app-test`, `service-test`, etc.
 
+## Short-Name Image Resolution
+
+Container images can be specified using short-names (e.g., `eclipse-temurin:17`) or fully qualified domain names (FQDN, e.g., `docker.io/library/eclipse-temurin:17`). When a short-name is used, the container runtime resolves it to an FQDN based on the cluster's `registries.conf` or OpenShift's `image.config.openshift.io` configuration.
+
+### How it Works
+
+The tool automatically resolves short-name images to their FQDN by reading the resolved image from pod status:
+
+| Resource Type | Resolution Method |
+|---------------|-------------------|
+| Pod | Uses `status.containerStatuses[*].image` directly |
+| Deployment | Finds pods via label selector, gets resolved image from pod status |
+| StatefulSet | Finds pods via label selector, gets resolved image from pod status |
+| DaemonSet | Finds pods via label selector, gets resolved image from pod status |
+| ReplicaSet | Finds pods via label selector, gets resolved image from pod status |
+| Job | Finds pods via `job-name` label, gets resolved image from pod status |
+| CronJob | Uses spec image directly (pods may not exist) |
+
+### Why This Matters
+
+If your local host doesn't have the same registry search configuration as the cluster (e.g., `unqualified-search-registries` in `registries.conf`), podman won't be able to pull short-name images. By resolving to FQDN first, the tool ensures images can be pulled and analyzed regardless of local registry configuration.
+
+### Limitations
+
+- **CronJobs**: Since CronJob pods are transient (created when scheduled, then cleaned up), the tool uses the spec image directly. If the CronJob uses a short-name image, it may fail to pull during analysis unless your local registry configuration can resolve it.
+- **Pods not running**: If a controller's pods are not running (e.g., scaled to 0, failed, pending), the resolved image cannot be obtained and the spec image is used.
+
 ## Image Analysis for cgroup v2 Compatibility
 
 When using the `--analyze` flag, the tool:
@@ -333,10 +360,13 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 | File | Description |
 |------|-------------|
 | `namespace-java.yaml` | Namespace `test-java` for Java test deployments |
+| `namespace-java-short.yaml` | Namespace `test-java-short` for Java test deployments with short-name images |
 | `namespace-node.yaml` | Namespace `test-node` for Node.js test deployments |
 | `namespace-dotnet.yaml` | Namespace `test-dotnet` for .NET test deployments |
 | `deployment-java-compatible.yaml` | Deployment with OpenJDK 17 (cgroups v2 compatible) |
 | `deployment-java-incompatible.yaml` | Deployment with OpenJDK 8u362 (cgroups v2 **incompatible**) |
+| `deployment-java-short-compatible.yaml` | Deployment with Eclipse Temurin 17 using short-name image (cgroups v2 compatible) |
+| `deployment-java-short-incompatible.yaml` | Deployment with Eclipse Temurin 8 using short-name image (cgroups v2 **incompatible**) |
 | `deployment-node-compatible.yaml` | Deployment with Node.js 20 (cgroups v2 compatible) |
 | `deployment-node-incompatible.yaml` | Deployment with Node.js 18 (cgroups v2 **incompatible**) |
 | `deployment-dotnet-compatible.yaml` | Deployment with .NET 8.0 (cgroups v2 compatible) |
@@ -345,10 +375,15 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 ### Deploying Test Resources
 
 ```bash
-# Deploy Java test resources
+# Deploy Java test resources (FQDN images)
 oc apply -f test/namespace-java.yaml
 oc apply -f test/deployment-java-compatible.yaml
 oc apply -f test/deployment-java-incompatible.yaml
+
+# Deploy Java test resources (short-name images)
+oc apply -f test/namespace-java-short.yaml
+oc apply -f test/deployment-java-short-compatible.yaml
+oc apply -f test/deployment-java-short-incompatible.yaml
 
 # Deploy Node.js test resources
 oc apply -f test/namespace-node.yaml
@@ -362,6 +397,7 @@ oc apply -f test/deployment-dotnet-incompatible.yaml
 
 # Verify pods are running
 oc get pods -n test-java
+oc get pods -n test-java-short
 oc get pods -n test-node
 oc get pods -n test-dotnet
 ```
@@ -382,7 +418,7 @@ oc get pods -n test-dotnet
 ### Cleanup
 
 ```bash
-oc delete namespace test-java test-node test-dotnet
+oc delete namespace test-java test-java-short test-node test-dotnet
 ```
 
 ## Project Structure
@@ -407,10 +443,13 @@ image-cgroupsv2-inspector/
 │   └── system_checks.py      # System requirements verification
 └── test/                     # Test Kubernetes manifests
     ├── namespace-java.yaml
+    ├── namespace-java-short.yaml
     ├── namespace-node.yaml
     ├── namespace-dotnet.yaml
     ├── deployment-java-compatible.yaml
     ├── deployment-java-incompatible.yaml
+    ├── deployment-java-short-compatible.yaml
+    ├── deployment-java-short-incompatible.yaml
     ├── deployment-node-compatible.yaml
     ├── deployment-node-incompatible.yaml
     ├── deployment-dotnet-compatible.yaml

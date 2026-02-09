@@ -1,0 +1,46 @@
+---
+# Deployment with Java version that SUPPORTS cgroups v2
+# Using short-name image reference (not FQDN)
+# OpenJDK 17 fully supports cgroups v2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-app-short-compatible
+  namespace: test-java-short
+  labels:
+    app: java-app-short-compatible
+    app.kubernetes.io/name: java-app-short-compatible
+    app.kubernetes.io/part-of: cgroups-v2-test
+    cgroups-v2-compatible: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-app-short-compatible
+  template:
+    metadata:
+      labels:
+        app: java-app-short-compatible
+    spec:
+      containers:
+        - name: java-short-compatible
+          # Short-name image reference - will be resolved via registries.conf
+          # Eclipse Temurin 17 - fully supports cgroups v2 (Java 15+)
+          # (openjdk images were deprecated on Docker Hub)
+          image: eclipse-temurin:17
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Java version (compatible with cgroups v2):"
+              java -version
+              echo "Sleeping indefinitely..."
+              sleep infinity
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+
