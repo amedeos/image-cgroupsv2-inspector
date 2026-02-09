@@ -5,6 +5,7 @@ Collects container image information from OpenShift cluster resources.
 This module implements smart collection that avoids duplicates by tracking
 parent-child relationships between Kubernetes objects:
 - Deployment -> ReplicaSet -> Pod
+- DeploymentConfig -> ReplicationController -> Pod
 - StatefulSet -> Pod
 - DaemonSet -> Pod
 - CronJob -> Job -> Pod
@@ -19,6 +20,7 @@ import fnmatch
 import logging
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Dict, Optional, Set
 
 import pandas as pd
@@ -89,7 +91,7 @@ class ImageCollector:
     Collects container image information from various OpenShift resources.
     
     Implements smart deduplication: only the highest-level controller
-    (Deployment, StatefulSet, DaemonSet, CronJob) is reported, not the
+    (Deployment, DeploymentConfig, StatefulSet, DaemonSet, CronJob) is reported, not the
     generated child objects (ReplicaSets, Jobs, Pods).
     
     Supports two modes:
@@ -586,6 +588,79 @@ class ImageCollector:
         print(f"    Found {count} containers in DaemonSets")
         return count
 
+    def collect_from_deploymentconfigs(self) -> int:
+        """
+        Collect images from OpenShift DeploymentConfigs.
+
+        DeploymentConfigs are OpenShift top-level controllers (apps.openshift.io/v1).
+        Their ReplicationControllers and Pods are skipped during collection.
+
+        Returns:
+            Number of containers found.
+        """
+        print("  Collecting images from DeploymentConfigs...")
+        count = 0
+        skipped_ns = 0
+
+        try:
+            custom_api = self.client.get_custom_objects_api()
+            group, version, plural = "apps.openshift.io", "v1", "deploymentconfigs"
+
+            if self.namespace:
+                response = custom_api.list_namespaced_custom_object(
+                    group=group, version=version, plural=plural, namespace=self.namespace
+                )
+            else:
+                response = custom_api.list_cluster_custom_object(
+                    group=group, version=version, plural=plural
+                )
+
+            for dc in response.get("items", []):
+                metadata = dc.get("metadata", {})
+                namespace = metadata.get("namespace", "")
+                if not namespace:
+                    continue
+
+                if self._is_namespace_excluded(namespace):
+                    skipped_ns += 1
+                    continue
+
+                dc_name = metadata.get("name", "")
+                spec = dc.get("spec", {})
+                template_spec = spec.get("template", {}).get("spec", {})
+
+                containers_spec = template_spec.get("containers") or []
+                init_containers_spec = template_spec.get("init_containers") or []
+                all_specs = containers_spec + init_containers_spec
+
+                # CustomObjectsApi returns dicts; _add_container_info expects .name and .image
+                all_containers = [
+                    SimpleNamespace(name=c.get("name", ""), image=c.get("image", ""))
+                    for c in all_specs
+                ]
+
+                selector = spec.get("selector") or {}
+                label_selector = self._build_label_selector(selector)
+                resolved_image_map = (
+                    self._get_resolved_images_from_pods(namespace, label_selector)
+                    if label_selector
+                    else {}
+                )
+
+                count += self._add_container_info(
+                    all_containers,
+                    namespace,
+                    "DeploymentConfig",
+                    dc_name,
+                    resolved_image_map=resolved_image_map,
+                )
+
+        except Exception as e:
+            print(f"    Warning: Error collecting from DeploymentConfigs: {e}")
+
+        print(f"    Found {count} containers in DeploymentConfigs")
+        return count
+
     def collect_from_jobs(self) -> int:
         """
         Collect images from standalone Jobs only (not managed by CronJob).
@@ -766,7 +841,7 @@ class ImageCollector:
         Collect images from all supported resource types.
         
         Collection order is important for deduplication:
-        1. Top-level controllers first (Deployment, StatefulSet, DaemonSet, CronJob)
+        1. Top-level controllers first (Deployment, DeploymentConfig, StatefulSet, DaemonSet, CronJob)
         2. Then intermediate controllers (ReplicaSet, Job) - only standalone ones
         3. Finally Pods - only standalone ones
 
@@ -787,6 +862,7 @@ class ImageCollector:
         
         # 1. Top-level controllers (always collected)
         total += self.collect_from_deployments()
+        total += self.collect_from_deploymentconfigs()
         total += self.collect_from_statefulsets()
         total += self.collect_from_daemonsets()
         total += self.collect_from_cronjobs()

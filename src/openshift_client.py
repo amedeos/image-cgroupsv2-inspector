@@ -219,6 +219,10 @@ class OpenShiftClient:
         """Get BatchV1Api instance."""
         return client.BatchV1Api(self.api_client)
 
+    def get_custom_objects_api(self) -> client.CustomObjectsApi:
+        """Get CustomObjectsApi instance (for OpenShift resources like DeploymentConfig)."""
+        return client.CustomObjectsApi(self.api_client)
+
     def disconnect(self) -> None:
         """Disconnect from the cluster."""
         if self._api_client:
