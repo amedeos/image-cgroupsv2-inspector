@@ -1,0 +1,46 @@
+---
+# DeploymentConfig with Java version that does NOT support cgroups v2
+# Using OpenJDK 8 from CentOS 7 (older version without cgroups v2 support)
+apiVersion: apps.openshift.io/v1
+kind: DeploymentConfig
+metadata:
+  name: java-app-incompatible-dc
+  namespace: test-java-dc
+  labels:
+    app: java-app-incompatible-dc
+    app.kubernetes.io/name: java-app-incompatible-dc
+    app.kubernetes.io/part-of: cgroups-v2-test
+    cgroups-v2-compatible: "false"
+spec:
+  replicas: 1
+  selector:
+    app: java-app-incompatible-dc
+  template:
+    metadata:
+      labels:
+        app: java-app-incompatible-dc
+    spec:
+      containers:
+        - name: java-incompatible
+          # Red Hat UBI 8 OpenJDK 8 - version depends on image tag
+          # cgroups v2 support was added in 8u372
+          # Using ubi8/openjdk-8 which typically has an older JDK 8 version
+          image: registry.access.redhat.com/ubi8/openjdk-8:1.14
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Java version (incompatible with cgroups v2):"
+              java -version
+              echo "Sleeping indefinitely..."
+              sleep infinity
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+  triggers:
+    - type: ConfigChange
+
