@@ -25,6 +25,7 @@ from typing import List, Dict, Optional, Set
 
 import pandas as pd
 from kubernetes import client
+from kubernetes.client.rest import ApiException
 
 from .openshift_client import OpenShiftClient
 from .image_analyzer import ImageAnalyzer, ImageAnalysisResult
@@ -655,6 +656,11 @@ class ImageCollector:
                     resolved_image_map=resolved_image_map,
                 )
 
+        except ApiException as e:
+            if e.status == 404:
+                print("    DeploymentConfig API not available (apps.openshift.io not installed, skipping)")
+            else:
+                print(f"    Warning: Error collecting from DeploymentConfigs: {e}")
         except Exception as e:
             print(f"    Warning: Error collecting from DeploymentConfigs: {e}")
 

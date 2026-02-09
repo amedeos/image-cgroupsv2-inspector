@@ -252,6 +252,7 @@ If your local host doesn't have the same registry search configuration as the cl
 
 ### Limitations
 
+- **DeploymentConfig**: DeploymentConfigs are an OpenShift-specific API (`apps.openshift.io`). If the cluster does not have this API (e.g. vanilla Kubernetes), the tool skips DeploymentConfigs and continues without error.
 - **CronJobs**: Since CronJob pods are transient (created when scheduled, then cleaned up), the tool uses the spec image directly. If the CronJob uses a short-name image, it may fail to pull during analysis unless your local registry configuration can resolve it.
 - **Pods not running**: If a controller's pods are not running (e.g., scaled to 0, failed, pending), the resolved image cannot be obtained and the spec image is used.
 
