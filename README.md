@@ -14,6 +14,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 - 📦 Collect container images from:
   - Pods
   - Deployments
+  - DeploymentConfigs (OpenShift)
   - StatefulSets
   - DaemonSets
   - Jobs
@@ -238,6 +239,7 @@ The tool automatically resolves short-name images to their FQDN by reading the r
 |---------------|-------------------|
 | Pod | Uses `status.containerStatuses[*].image` directly |
 | Deployment | Finds pods via label selector, gets resolved image from pod status |
+| DeploymentConfig | Finds pods via label selector, gets resolved image from pod status |
 | StatefulSet | Finds pods via label selector, gets resolved image from pod status |
 | DaemonSet | Finds pods via label selector, gets resolved image from pod status |
 | ReplicaSet | Finds pods via label selector, gets resolved image from pod status |
@@ -250,6 +252,7 @@ If your local host doesn't have the same registry search configuration as the cl
 
 ### Limitations
 
+- **DeploymentConfig**: DeploymentConfigs are an OpenShift-specific API (`apps.openshift.io`). If the cluster does not have this API (e.g. vanilla Kubernetes), the tool skips DeploymentConfigs and continues without error.
 - **CronJobs**: Since CronJob pods are transient (created when scheduled, then cleaned up), the tool uses the spec image directly. If the CronJob uses a short-name image, it may fail to pull during analysis unless your local registry configuration can resolve it.
 - **Pods not running**: If a controller's pods are not running (e.g., scaled to 0, failed, pending), the resolved image cannot be obtained and the spec image is used.
 
@@ -300,7 +303,7 @@ The tool generates a CSV file in the `output` directory with the following colum
 |--------|-------------|
 | `container_name` | Name of the container |
 | `namespace` | Kubernetes namespace |
-| `object_type` | Type of object (Pod, Deployment, StatefulSet, etc.) |
+| `object_type` | Type of object (Pod, Deployment, DeploymentConfig, StatefulSet, etc.) |
 | `object_name` | Name of the parent object |
 | `image_name` | Full image name with tag |
 | `image_id` | Full image ID (when available) |
@@ -371,6 +374,9 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 | `deployment-node-incompatible.yaml` | Deployment with Node.js 18 (cgroups v2 **incompatible**) |
 | `deployment-dotnet-compatible.yaml` | Deployment with .NET 8.0 (cgroups v2 compatible) |
 | `deployment-dotnet-incompatible.yaml` | Deployment with .NET Core 3.0 (cgroups v2 **incompatible**) |
+| `namespace-java-dc.yaml` | Namespace `test-java-dc` for DeploymentConfig tests |
+| `deploymentconfig-java-compatible.yaml` | DeploymentConfig with OpenJDK 17 (cgroups v2 compatible) |
+| `deploymentconfig-java-incompatible.yaml` | DeploymentConfig with OpenJDK 8u362 (cgroups v2 **incompatible**) |
 
 ### Deploying Test Resources
 
@@ -395,11 +401,17 @@ oc apply -f test/namespace-dotnet.yaml
 oc apply -f test/deployment-dotnet-compatible.yaml
 oc apply -f test/deployment-dotnet-incompatible.yaml
 
+# Deploy DeploymentConfig test resources (OpenShift)
+oc apply -f test/namespace-java-dc.yaml
+oc apply -f test/deploymentconfig-java-compatible.yaml
+oc apply -f test/deploymentconfig-java-incompatible.yaml
+
 # Verify pods are running
 oc get pods -n test-java
 oc get pods -n test-java-short
 oc get pods -n test-node
 oc get pods -n test-dotnet
+oc get pods -n test-java-dc
 ```
 
 ### Running Analysis on Test Resources
