@@ -140,6 +140,9 @@ pip install -r requirements.txt
 # Analyze images for Java/NodeJS/.NET cgroup v2 compatibility
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
 
+# Rewrite internal image-registry.svc images to external registry route (if available)
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --prefer-external-registry
+
 # Inspect only a specific namespace
 ./image-cgroupsv2-inspector -n my-namespace
 ./image-cgroupsv2-inspector --namespace my-namespace --analyze --rootfs-path /tmp/images
@@ -166,6 +169,7 @@ oc whoami --show-server
 | `--output-dir` | Directory to save CSV output (default: `output`) |
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
+| `--prefer-external-registry` | Rewrite internal image-registry.svc images to external registry route (if available) |
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |

@@ -20,7 +20,6 @@ import urllib3
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-
 class OpenShiftClient:
     """
     Client for connecting to OpenShift clusters.
@@ -29,7 +28,7 @@ class OpenShiftClient:
 
     def __init__(self, api_url: Optional[str] = None, token: Optional[str] = None, 
                  env_file: str = ".env", pull_secret_file: str = ".pull-secret",
-                 verify_ssl: bool = False):
+                 prefer_external_registry: bool = False, verify_ssl: bool = False):
         """
         Initialize the OpenShift client.
 
@@ -45,6 +44,7 @@ class OpenShiftClient:
         self.verify_ssl = verify_ssl
         self._api_client: Optional[ApiClient] = None
         self._cluster_name: Optional[str] = None
+        self.prefer_external_registry = prefer_external_registry
         
         # Load environment variables from .env file
         if self.env_file.exists():
@@ -124,6 +124,12 @@ class OpenShiftClient:
             
             # Download and save pull-secret
             self._download_pull_secret()
+
+            if self.prefer_external_registry and self.external_registry_host:
+                print(f"  Using external registry: {self.external_registry_host}")
+                # Extend pull secret with token
+                pull_secret_path = self._extend_pull_secret_with_token(self.pull_secret_file)
+                print(f"✓ External registry token saved to {self.pull_secret_file}")
             
             return True
             
@@ -192,6 +198,80 @@ class OpenShiftClient:
         except Exception as e:
             print(f"⚠ Error downloading pull-secret: {e}")
             return False
+    
+    def _get_registry_route(self) -> Optional[str]:
+            """
+            Returns the external OpenShift image registry route hostname.
+            Example: default-route-openshift-image-registry.apps.<cluster>
+            """
+            try:
+                custom = self.get_custom_objects_api()
+                route = custom.get_namespaced_custom_object(
+                    group="route.openshift.io",
+                    version="v1",
+                    namespace="openshift-image-registry",
+                    plural="routes",
+                    name="default-route",
+                )
+                host = route.get("spec", {}).get("host", "")
+                return host or None
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                print(f"[WARN] Unable to fetch external registry route: {e}")
+                return None
+            except Exception as e:
+                print(f"[WARN] Error retrieving registry route: {e}")
+                return None
+
+    def _extend_pull_secret_with_token(self, pull_secret_path: str = ".pull-secret") -> str:
+        """
+        Extends the existing .pull-secret adding credentials for the *external* registry route.
+        Uses the same token passed to the client.
+        """
+        path = Path(pull_secret_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Pull secret not found at: {pull_secret_path}")
+
+        # Load current pull-secret
+        data = json.loads(path.read_text())
+        data.setdefault("auths", {})
+
+        # Detect external registry route
+        external_route = self._get_registry_route()
+        if not external_route:
+            raise RuntimeError("External registry route not available; cannot extend pull-secret")
+
+        # Podman requires base64("oauth2:<token>")
+        auth_string = f"oauth2:{self.token}"
+        encoded = base64.b64encode(auth_string.encode()).decode()
+
+        # Insert entry for EXTERNAL registry route
+        data["auths"][external_route] = {
+            "auth": encoded
+        }
+
+        # Write back
+        path.write_text(json.dumps(data, indent=2))
+        return str(path)
+
+    def replace_internal_with_external_registry(self, image_name: str) -> str:
+        """
+        Replace the internal registry with the external one in the image name, if configured.
+        """
+        internal = "image-registry.openshift-image-registry.svc:5000"
+        if self.prefer_external_registry and self.external_registry_host and image_name.startswith(internal):
+            return image_name.replace(internal, self.external_registry_host, 1)
+        return image_name
+
+    @property
+    def external_registry_host(self) -> Optional[str]:
+        """
+        Get the current external registry route (always up-to-date).
+        """
+        if self.prefer_external_registry:
+            return self._get_registry_route()
+        return None
 
     @property
     def api_client(self) -> ApiClient:

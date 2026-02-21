@@ -136,6 +136,12 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--prefer-external-registry",
+        action="store_true",
+        help="Rewrite internal image-registry.svc images to external registry route (if available)"
+    )
+
+    parser.add_argument(
         "--exclude-namespaces",
         dest="exclude_namespaces",
         type=str,
@@ -303,7 +309,8 @@ def main() -> int:
             api_url=args.api_url,
             token=args.token,
             env_file=args.env_file,
-            verify_ssl=args.verify_ssl
+            verify_ssl=args.verify_ssl,
+            prefer_external_registry=args.prefer_external_registry
         )
         
         # Check if we have credentials
