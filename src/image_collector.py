@@ -121,7 +121,9 @@ class ImageCollector:
         self.client = openshift_client
         self.images: List[ContainerImageInfo] = []
         self.namespace = namespace  # Single namespace mode if set
-        
+        self.prefer_external_registry = getattr(openshift_client, 'prefer_external_registry', False)
+        self.external_registry_host = getattr(openshift_client, 'external_registry_host', None)
+
         # Set up namespace exclusion patterns (only used when namespace is None)
         if namespace:
             # Single namespace mode - no exclusion patterns needed
@@ -130,7 +132,7 @@ class ImageCollector:
             self.exclude_patterns = DEFAULT_EXCLUDE_NAMESPACE_PATTERNS.copy()
         else:
             self.exclude_patterns = exclude_namespace_patterns
-        
+
         # Cache of excluded namespaces (populated during collection)
         self._excluded_namespaces_cache: Set[str] = set()
 
@@ -155,6 +157,15 @@ class ImageCollector:
                 return True
         
         return False
+
+    def replace_internal_with_external_registry(self, image_name: str) -> str:
+        """
+        Replace the internal registry with the external one in the image name, if configured.
+        """
+        internal = "image-registry.openshift-image-registry.svc:5000"
+        if self.prefer_external_registry and self.external_registry_host and image_name.startswith(internal):
+            return image_name.replace(internal, self.client.external_registry_host, 1)
+        return image_name
 
     def _get_owner_references(self, metadata) -> List[Dict[str, str]]:
         """
@@ -308,7 +319,10 @@ class ImageCollector:
                 )
             else:
                 image_name = spec_image
-            
+
+            # Replace internal registry with external one only if prefer_external_registry is True
+            image_name = self.replace_internal_with_external_registry(image_name)
+
             info = ContainerImageInfo(
                 container_name=container.name,
                 image_name=image_name,
@@ -319,7 +333,7 @@ class ImageCollector:
             )
             self.images.append(info)
             count += 1
-            
+
         return count
 
     def collect_from_pods(self) -> int:
