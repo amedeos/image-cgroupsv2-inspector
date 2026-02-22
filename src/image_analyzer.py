@@ -425,6 +425,12 @@ class ImageAnalyzer:
         """
         Find binaries matching pattern in extracted filesystem.
         
+        Follows symlinks to find binaries reachable through internal symlinks
+        (e.g. /usr/local/java -> /opt/java-17/) but prunes symlinked
+        directories that resolve outside the extracted rootfs.  Without this
+        guard, absolute symlinks such as /var/run -> /run cause os.walk to
+        escape into the host filesystem and potentially hang forever.
+        
         Args:
             base_path: Base path to search
             pattern: Regex pattern to match
@@ -433,32 +439,37 @@ class ImageAnalyzer:
             List of paths to found binaries
         """
         found = []
+        real_base = os.path.realpath(str(base_path))
         
         try:
             for root, dirs, files in os.walk(base_path, followlinks=True):
+                # Prune symlinked directories that escape the extracted rootfs
+                dirs[:] = [
+                    d for d in dirs
+                    if not os.path.islink(os.path.join(root, d))
+                    or self._symlink_stays_in_rootfs(
+                        os.path.join(root, d), str(base_path), real_base
+                    )
+                ]
+
                 for file in files:
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, base_path)
                     
                     if pattern.match(f"/{rel_path}"):
-                        # Check if file exists (could be broken symlink)
                         if os.path.exists(full_path) or os.path.islink(full_path):
-                            # For symlinks, resolve to actual file
                             resolved_path = full_path
                             if os.path.islink(full_path):
                                 try:
-                                    # Try to resolve symlink within the extracted fs
                                     link_target = os.readlink(full_path)
                                     if os.path.isabs(link_target):
-                                        # Absolute symlink - resolve relative to base_path
-                                        resolved_path = os.path.join(base_path, link_target.lstrip('/'))
+                                        resolved_path = os.path.join(str(base_path), link_target.lstrip('/'))
                                     else:
                                         resolved_path = os.path.join(os.path.dirname(full_path), link_target)
                                     resolved_path = os.path.normpath(resolved_path)
                                 except Exception:
                                     pass
                             
-                            # Check if resolved path exists and is a file
                             if os.path.isfile(resolved_path):
                                 found.append(resolved_path)
                             elif os.path.isfile(full_path):
@@ -467,6 +478,20 @@ class ImageAnalyzer:
             pass
         
         return found
+
+    @staticmethod
+    def _symlink_stays_in_rootfs(link_path: str, base_path: str, real_base: str) -> bool:
+        """Return True if the symlinked directory resolves inside the rootfs."""
+        try:
+            link_target = os.readlink(link_path)
+            if os.path.isabs(link_target):
+                resolved = os.path.join(base_path, link_target.lstrip('/'))
+            else:
+                resolved = os.path.join(os.path.dirname(link_path), link_target)
+            resolved = os.path.realpath(resolved)
+            return resolved == real_base or resolved.startswith(real_base + os.sep)
+        except Exception:
+            return False
     
     def _get_java_version_in_container(self, image_name: str, binary_path: str, debug: bool = False) -> Tuple[str, str, str]:
         """
