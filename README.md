@@ -377,6 +377,12 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 | `namespace-java-dc.yaml` | Namespace `test-java-dc` for DeploymentConfig tests |
 | `deploymentconfig-java-compatible.yaml` | DeploymentConfig with OpenJDK 17 (cgroups v2 compatible) |
 | `deploymentconfig-java-incompatible.yaml` | DeploymentConfig with OpenJDK 8u362 (cgroups v2 **incompatible**) |
+| `namespace-java-intreg.yaml` | Namespace `test-java-internalreg` for internal registry test deployments |
+| `registry-default-route.yaml` | Enable default route on the OpenShift internal image registry |
+| `imagestream-java-intreg-compatible.yaml` | ImageStream importing `ubi8/openjdk-17:latest` into the internal registry |
+| `imagestream-java-intreg-incompatible.yaml` | ImageStream importing `ubi8/openjdk-8:1.14` into the internal registry |
+| `deployment-java-intreg-compatible.yaml` | Deployment with OpenJDK 17 from internal registry (cgroups v2 compatible) |
+| `deployment-java-intreg-incompatible.yaml` | Deployment with OpenJDK 8 from internal registry (cgroups v2 **incompatible**) |
 
 ### Deploying Test Resources
 
@@ -406,12 +412,21 @@ oc apply -f test/namespace-java-dc.yaml
 oc apply -f test/deploymentconfig-java-compatible.yaml
 oc apply -f test/deploymentconfig-java-incompatible.yaml
 
+# Deploy internal registry test resources
+oc apply -f test/registry-default-route.yaml
+oc apply -f test/namespace-java-intreg.yaml
+oc apply -f test/imagestream-java-intreg-compatible.yaml
+oc apply -f test/imagestream-java-intreg-incompatible.yaml
+oc apply -f test/deployment-java-intreg-compatible.yaml
+oc apply -f test/deployment-java-intreg-incompatible.yaml
+
 # Verify pods are running
 oc get pods -n test-java
 oc get pods -n test-java-short
 oc get pods -n test-node
 oc get pods -n test-dotnet
 oc get pods -n test-java-dc
+oc get pods -n test-java-internalreg
 ```
 
 ### Running Analysis on Test Resources
@@ -430,7 +445,7 @@ oc get pods -n test-java-dc
 ### Cleanup
 
 ```bash
-oc delete namespace test-java test-java-short test-node test-dotnet
+oc delete namespace test-java test-java-short test-node test-dotnet test-java-dc test-java-internalreg
 ```
 
 ## Project Structure
@@ -465,7 +480,13 @@ image-cgroupsv2-inspector/
     ├── deployment-node-compatible.yaml
     ├── deployment-node-incompatible.yaml
     ├── deployment-dotnet-compatible.yaml
-    └── deployment-dotnet-incompatible.yaml
+    ├── deployment-dotnet-incompatible.yaml
+    ├── namespace-java-intreg.yaml
+    ├── registry-default-route.yaml
+    ├── imagestream-java-intreg-compatible.yaml
+    ├── imagestream-java-intreg-incompatible.yaml
+    ├── deployment-java-intreg-compatible.yaml
+    └── deployment-java-intreg-incompatible.yaml
 ```
 
 ## Contributing
