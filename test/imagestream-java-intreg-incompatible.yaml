@@ -1,0 +1,21 @@
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: openjdk-8
+  namespace: test-java-internalreg
+  labels:
+    app.kubernetes.io/name: openjdk-8
+    app.kubernetes.io/part-of: cgroups-v2-test
+spec:
+  lookupPolicy:
+    local: true
+  tags:
+    - name: "1.14"
+      from:
+        kind: DockerImage
+        name: registry.access.redhat.com/ubi8/openjdk-8:1.14
+      importPolicy:
+        scheduled: true
+      referencePolicy:
+        type: Local
