@@ -260,12 +260,33 @@ If your local host doesn't have the same registry search configuration as the cl
 
 When using the `--analyze` flag, the tool:
 
-1. Pulls each unique container image using podman
-2. Exports the container filesystem to a temporary directory
-3. Searches for Java, Node.js, and .NET binaries
-4. Executes `-version` / `--version` to determine the exact version
-5. Checks if the version is compatible with cgroup v2
-6. Cleans up the image and filesystem after each analysis
+1. Detects the OpenShift internal registry default-route (if exposed)
+2. Pulls each unique container image using podman (rewriting internal registry URLs when needed)
+3. Exports the container filesystem to a temporary directory
+4. Searches for Java, Node.js, and .NET binaries
+5. Executes `-version` / `--version` to determine the exact version
+6. Checks if the version is compatible with cgroup v2
+7. Cleans up the image and filesystem after each analysis
+
+### Internal Registry Support
+
+Images that reference the cluster-internal registry service address (`image-registry.openshift-image-registry.svc:5000/...`) cannot be pulled directly from outside the cluster. When the tool detects such images, it automatically:
+
+1. Queries the cluster for the internal registry's external route (`default-route` in `openshift-image-registry`)
+2. Rewrites the image URL to use the external route for pulling
+3. Uses `--tls-verify=false` for the pull (the default-route typically uses a self-signed certificate)
+
+To enable this feature, ensure the internal registry default-route is exposed:
+
+```bash
+oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
+```
+
+Or apply the provided YAML:
+
+```bash
+oc apply -f test/registry-default-route.yaml
+```
 
 ### cgroup v2 Minimum Versions
 

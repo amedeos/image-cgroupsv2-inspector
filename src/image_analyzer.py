@@ -167,17 +167,30 @@ class ImageAnalyzer:
     IBM_SEMERU_PATTERN = re.compile(r'IBM Semeru', re.IGNORECASE)
     IBM_SDK_PATTERN = re.compile(r'IBM (?:J9|SDK)', re.IGNORECASE)
     
-    def __init__(self, rootfs_base_path: str, pull_secret_path: Optional[str] = None):
+    INTERNAL_REGISTRY_SVC = "image-registry.openshift-image-registry.svc"
+
+    def __init__(self, rootfs_base_path: str, pull_secret_path: Optional[str] = None,
+                 internal_registry_route: Optional[str] = None,
+                 openshift_token: Optional[str] = None):
         """
         Initialize the image analyzer.
         
         Args:
             rootfs_base_path: Base path where rootfs directory exists
             pull_secret_path: Path to the pull-secret file for authentication
+            internal_registry_route: External hostname for the OpenShift internal
+                registry (e.g. 'default-route-openshift-image-registry.apps.example.com').
+                When set, images referencing the cluster-internal service address
+                are rewritten to use this route so podman can pull them.
+            openshift_token: Bearer token for authenticating to the internal
+                registry route via ``podman login``.
         """
         self.rootfs_base = Path(rootfs_base_path).resolve()
         self.rootfs_path = self.rootfs_base / "rootfs"
         self.pull_secret_path = Path(pull_secret_path) if pull_secret_path else None
+        self.internal_registry_route = internal_registry_route
+        self.openshift_token = openshift_token
+        self._registry_logged_in = False
         
         # Ensure rootfs directory exists
         self.rootfs_path.mkdir(parents=True, exist_ok=True)
@@ -225,6 +238,55 @@ class ImageAnalyzer:
                 print(f"      [DEBUG] Exception: {e}")
             return -1, "", str(e)
     
+    def _login_internal_registry(self, debug: bool = False) -> bool:
+        """
+        Authenticate to the internal registry route using the OpenShift token.
+        Only runs once per session; subsequent calls are no-ops.
+
+        Returns:
+            True if login succeeded or was already done.
+        """
+        if self._registry_logged_in:
+            return True
+        if not self.internal_registry_route or not self.openshift_token:
+            return False
+
+        cmd = ["podman", "login", "--tls-verify=false"]
+        if self.pull_secret_path and self.pull_secret_path.exists():
+            cmd.extend(["--authfile", str(self.pull_secret_path)])
+        cmd.extend([
+            "-u", "unused",
+            "-p", self.openshift_token,
+            self.internal_registry_route,
+        ])
+        exit_code, stdout, stderr = self._run_command(cmd, timeout=30, debug=debug)
+        if exit_code == 0:
+            self._registry_logged_in = True
+            print(f"    ✓ Logged in to internal registry: {self.internal_registry_route}")
+            return True
+        print(f"    ✗ Failed to login to internal registry: {stderr.strip()}")
+        return False
+
+    def _rewrite_internal_registry(self, image_name: str) -> str:
+        """
+        If image_name points to the cluster-internal registry service, replace
+        that address with the external default-route so podman can pull it.
+
+        Example:
+            image-registry.openshift-image-registry.svc:5000/ns/img:tag
+            -> default-route-openshift-image-registry.apps.example.com/ns/img:tag
+        """
+        if not self.internal_registry_route:
+            return image_name
+        if image_name.startswith(self.INTERNAL_REGISTRY_SVC):
+            suffix = image_name[len(self.INTERNAL_REGISTRY_SVC):]
+            if suffix.startswith(":"):
+                suffix = suffix.split("/", 1)[-1] if "/" in suffix else ""
+                if suffix:
+                    suffix = "/" + suffix
+            return self.internal_registry_route + suffix
+        return image_name
+
     def _setup_auth(self) -> Optional[str]:
         """
         Set up authentication for podman using pull-secret.
@@ -243,6 +305,9 @@ class ImageAnalyzer:
         """
         Pull a container image using podman.
         
+        If the image references the cluster-internal registry service and an
+        external route is configured, the address is rewritten before pulling.
+        
         Args:
             image_name: Full image name with registry and tag/digest
             debug: Enable debug output
@@ -250,7 +315,13 @@ class ImageAnalyzer:
         Returns:
             Tuple of (success, error_message)
         """
-        cmd = ["podman", "pull"]
+        pull_name = self._rewrite_internal_registry(image_name)
+        if pull_name != image_name:
+            if debug:
+                print(f"      [DEBUG] Rewriting internal registry URL: {image_name} -> {pull_name}")
+            self._login_internal_registry(debug=debug)
+
+        cmd = ["podman", "pull", "--tls-verify=false"]
         
         auth_file = self._setup_auth()
         if auth_file:
@@ -258,7 +329,7 @@ class ImageAnalyzer:
             if debug:
                 print(f"      [DEBUG] Using authfile: {auth_file}")
         
-        cmd.append(image_name)
+        cmd.append(pull_name)
         
         if debug:
             print(f"      [DEBUG] Pulling image...")
@@ -859,10 +930,15 @@ class ImageAnalyzer:
         
         result = ImageAnalysisResult(image_name=image_name, image_id=image_id)
         
+        # Resolve the name podman will actually use (may differ for internal registry images)
+        podman_image = self._rewrite_internal_registry(image_name)
+        
         if debug:
             print(f"      [DEBUG] rootfs_base: {self.rootfs_base}")
             print(f"      [DEBUG] rootfs_path: {self.rootfs_path}")
             print(f"      [DEBUG] rootfs_path exists: {self.rootfs_path.exists()}")
+            if podman_image != image_name:
+                print(f"      [DEBUG] Using rewritten image for podman: {podman_image}")
         
         try:
             print(f"    Pulling image: {image_name[:80]}...")
@@ -877,11 +953,11 @@ class ImageAnalyzer:
             print(f"    Exporting container filesystem...")
             
             # Create and export container
-            success, tar_path, error = self._create_and_export_container(image_name, debug=debug)
+            success, tar_path, error = self._create_and_export_container(podman_image, debug=debug)
             if not success:
                 result.error = error
                 print(f"    ✗ Export failed: {error[:100]}")
-                self._cleanup(image_name, debug=debug)
+                self._cleanup(podman_image, debug=debug)
                 return result
             
             print(f"    Extracting filesystem...")
@@ -891,7 +967,7 @@ class ImageAnalyzer:
             if not success:
                 result.error = error
                 print(f"    ✗ Extract failed: {error[:100]}")
-                self._cleanup(image_name, debug=debug)
+                self._cleanup(podman_image, debug=debug)
                 return result
             
             extract_path = self.rootfs_path / "extracted"
@@ -927,7 +1003,7 @@ class ImageAnalyzer:
                 
                 # Run version check inside container
                 version, output, runtime_type = self._get_java_version_in_container(
-                    image_name, container_path, debug=debug
+                    podman_image, container_path, debug=debug
                 )
                 is_compatible = self._check_java_compatibility(version, runtime_type)
                 
@@ -963,7 +1039,7 @@ class ImageAnalyzer:
                 
                 # Run version check inside container
                 version, output = self._get_node_version_in_container(
-                    image_name, container_path, debug=debug
+                    podman_image, container_path, debug=debug
                 )
                 is_compatible = self._check_node_compatibility(version)
                 
@@ -999,7 +1075,7 @@ class ImageAnalyzer:
                 
                 # Run version check inside container
                 version, output = self._get_dotnet_version_in_container(
-                    image_name, container_path, debug=debug
+                    podman_image, container_path, debug=debug
                 )
                 is_compatible = self._check_dotnet_compatibility(version)
                 
@@ -1035,7 +1111,7 @@ class ImageAnalyzer:
         
         finally:
             # Always cleanup
-            self._cleanup(image_name, debug=debug)
+            self._cleanup(podman_image, debug=debug)
         
         # Cache result
         self._analyzed_images[cache_key] = result

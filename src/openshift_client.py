@@ -223,6 +223,41 @@ class OpenShiftClient:
         """Get CustomObjectsApi instance (for OpenShift resources like DeploymentConfig)."""
         return client.CustomObjectsApi(self.api_client)
 
+    def get_internal_registry_route(self) -> Optional[str]:
+        """
+        Get the default route hostname for the OpenShift internal image registry.
+        
+        Queries the route.openshift.io API for the 'default-route' in the
+        openshift-image-registry namespace.
+
+        Returns:
+            The route hostname (e.g., 'default-route-openshift-image-registry.apps.example.com')
+            or None if not available.
+        """
+        try:
+            custom_api = self.get_custom_objects_api()
+            route = custom_api.get_namespaced_custom_object(
+                group="route.openshift.io",
+                version="v1",
+                namespace="openshift-image-registry",
+                plural="routes",
+                name="default-route",
+            )
+            host = route.get("spec", {}).get("host", "")
+            if host:
+                print(f"✓ Internal registry route: {host}")
+                return host
+        except ApiException as e:
+            if e.status == 404:
+                print("⚠ Internal registry default-route not found (not exposed)")
+            elif e.status == 403:
+                print("⚠ No permission to read internal registry route")
+            else:
+                print(f"⚠ Error querying internal registry route: {e.reason}")
+        except Exception as e:
+            print(f"⚠ Error querying internal registry route: {e}")
+        return None
+
     def disconnect(self) -> None:
         """Disconnect from the cluster."""
         if self._api_client:
