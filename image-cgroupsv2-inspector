@@ -147,6 +147,16 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--internal-registry-route",
+        dest="internal_registry_route",
+        type=str,
+        help="Custom hostname for the OpenShift internal registry route "
+             "(e.g., 'my-registry-openshift-image-registry.apps.example.com'). "
+             "When not specified, the tool auto-detects the 'default-route' from the cluster. "
+             "Use this when the cluster exposes a custom route instead of the default one."
+    )
+
+    parser.add_argument(
         "-v", "--verbose",
         dest="verbose",
         action="store_true",
@@ -390,11 +400,16 @@ def main() -> int:
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
             
-            # Check for internal registry route (needed to pull internal images)
-            internal_registry_route = client.get_internal_registry_route()
-            if internal_registry_route:
+            # Determine internal registry route (needed to pull internal images)
+            if args.internal_registry_route:
+                internal_registry_route = args.internal_registry_route
+                print(f"✓ Using custom internal registry route: {internal_registry_route}")
                 if log_to_file:
-                    logger.info(f"Internal registry route: {internal_registry_route}")
+                    logger.info(f"Using custom internal registry route: {internal_registry_route}")
+            else:
+                internal_registry_route = client.get_internal_registry_route()
+                if internal_registry_route and log_to_file:
+                    logger.info(f"Auto-detected internal registry route: {internal_registry_route}")
             
             # Analyze images (saves CSV after each image for resumability)
             if log_to_file:
