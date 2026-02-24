@@ -245,7 +245,7 @@ The exclusion patterns support glob-style wildcards:
 
 ## Short-Name Image Resolution
 
-Container images can be specified using short-names (e.g., `eclipse-temurin:17`) or fully qualified domain names (FQDN, e.g., `docker.io/library/eclipse-temurin:17`). When a short-name is used, the container runtime resolves it to an FQDN based on the cluster's `registries.conf` or OpenShift's `image.config.openshift.io` configuration.
+Container images can be specified using short-names (e.g., `eclipse-temurin:17`) or fully qualified domain names (FQDN, e.g., `docker.io/library/eclipse-temurin:17`). When a pod is scheduled, the kubelet asks the container runtime (CRI-O) to pull the image. For short-name images, CRI-O tries the registries listed in `unqualified-search-registries` from its `registries.conf` until the pull succeeds. The FQDN of the image that was actually pulled is then recorded in the pod's `status.containerStatuses[*].image` field.
 
 ### How it Works
 
