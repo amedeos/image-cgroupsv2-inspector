@@ -40,6 +40,21 @@ This tool connects to an OpenShift cluster, collects information about all conta
 >
 > 1. **Registry Accessibility**: All container registries used by the cluster must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registries.
 >
+>    **OpenShift Internal Registry**: Images hosted in the OpenShift internal registry (`image-registry.openshift-image-registry.svc:5000/...`) are also supported. The tool automatically detects these images and rewrites the pull URL to use the registry's external route. By default, the tool auto-detects the `default-route` in the `openshift-image-registry` namespace. If your cluster uses a **custom route** instead of the default one, you can specify it with `--internal-registry-route`:
+>    ```bash
+>    # Auto-detect (uses default-route)
+>    ./image-cgroupsv2-inspector --analyze --rootfs-path /tmp/images
+>
+>    # Custom route
+>    ./image-cgroupsv2-inspector --analyze --rootfs-path /tmp/images \
+>      --internal-registry-route my-registry-openshift-image-registry.apps.example.com
+>    ```
+>    For auto-detection to work, the internal registry default-route must be exposed:
+>    ```bash
+>    oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
+>    ```
+>    The token used to connect to the cluster is also used to authenticate against the internal registry route. Note that `--tls-verify=false` is used automatically for these pulls, as the route typically uses a self-signed certificate.
+>
 > 2. **Pull Secret Configuration**: The cluster's pull-secret (downloaded automatically or provided via `--pull-secret`) must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can also provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option.
 
 ## Requirements
@@ -170,6 +185,7 @@ oc whoami --show-server
 | `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
 | `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
+| `--internal-registry-route` | Custom hostname for the OpenShift internal registry route. When not specified, the tool auto-detects the `default-route` from the cluster |
 | `--log-to-file` | Enable logging to file |
 | `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
 | `-v, --verbose` | Enable verbose output |
@@ -272,11 +288,24 @@ When using the `--analyze` flag, the tool:
 
 Images that reference the cluster-internal registry service address (`image-registry.openshift-image-registry.svc:5000/...`) cannot be pulled directly from outside the cluster. When the tool detects such images, it automatically:
 
-1. Queries the cluster for the internal registry's external route (`default-route` in `openshift-image-registry`)
+1. Determines the external route for the internal registry:
+   - If `--internal-registry-route` is specified, that hostname is used directly
+   - Otherwise, queries the cluster for the `default-route` in `openshift-image-registry`
 2. Rewrites the image URL to use the external route for pulling
-3. Uses `--tls-verify=false` for the pull (the default-route typically uses a self-signed certificate)
+3. Uses `--tls-verify=false` for the pull (the route typically uses a self-signed certificate)
 
-To enable this feature, ensure the internal registry default-route is exposed:
+**Using a custom registry route:**
+
+Some clusters expose the internal registry through a custom route rather than the default one. In that case, use `--internal-registry-route`:
+
+```bash
+./image-cgroupsv2-inspector --analyze --rootfs-path /tmp/images \
+  --internal-registry-route my-registry-openshift-image-registry.apps.example.com
+```
+
+**Using auto-detection (default-route):**
+
+To enable auto-detection, ensure the internal registry default-route is exposed:
 
 ```bash
 oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
