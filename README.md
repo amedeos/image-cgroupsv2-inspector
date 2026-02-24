@@ -10,7 +10,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 ## Features
 
 - 🔌 Connect to OpenShift cluster via API URL and bearer token
-- 🔑 Automatically download and save cluster pull-secret to `.pull-secret`
+- 🔑 Automatically download and save cluster pull-secret to `.pull-secret` (skipped if the file already exists)
 - 📦 Collect container images from:
   - Pods
   - Deployments
@@ -55,7 +55,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 >    ```
 >    The token used to connect to the cluster is also used to authenticate against the internal registry route. Note that `--tls-verify=false` is used automatically for these pulls, as the route typically uses a self-signed certificate.
 >
-> 2. **Pull Secret Configuration**: The cluster's pull-secret (downloaded automatically or provided via `--pull-secret`) must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can also provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option.
+> 2. **Pull Secret Configuration**: The cluster's pull-secret must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option. If the pull-secret file already exists at the specified path (default: `.pull-secret`), the tool will use it as-is and **will not** download the cluster pull-secret, avoiding accidental overwrites. The automatic download from the cluster only happens when the file does not exist yet.
 
 ## Requirements
 

@@ -147,9 +147,16 @@ class OpenShiftClient:
         Download the cluster pull-secret from openshift-config namespace
         and save it to the pull-secret file.
 
+        If the pull-secret file already exists, the download is skipped
+        to avoid overwriting a user-provided pull-secret.
+
         Returns:
             True if successful, False otherwise.
         """
+        if self.pull_secret_file.exists():
+            print(f"✓ Pull secret already exists at {self.pull_secret_file}, skipping download")
+            return True
+
         try:
             core_v1 = self.get_core_v1_api()
             
