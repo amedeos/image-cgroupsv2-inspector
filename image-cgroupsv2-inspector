@@ -390,6 +390,12 @@ def main() -> int:
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
             
+            # Check for internal registry route (needed to pull internal images)
+            internal_registry_route = client.get_internal_registry_route()
+            if internal_registry_route:
+                if log_to_file:
+                    logger.info(f"Internal registry route: {internal_registry_route}")
+            
             # Analyze images (saves CSV after each image for resumability)
             if log_to_file:
                 logger.info("Starting image analysis...")
@@ -399,7 +405,9 @@ def main() -> int:
                 debug=args.verbose,
                 cluster_name=client.cluster_name,
                 output_dir=args.output_dir,
-                logger=logger if log_to_file else None
+                logger=logger if log_to_file else None,
+                internal_registry_route=internal_registry_route,
+                openshift_token=client.token
             )
             if log_to_file:
                 logger.info("Image analysis completed")

@@ -952,7 +952,9 @@ class ImageCollector:
         debug: bool = False,
         cluster_name: Optional[str] = None,
         output_dir: str = "output",
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        internal_registry_route: Optional[str] = None,
+        openshift_token: Optional[str] = None
     ) -> tuple:
         """
         Analyze all collected images for Java, NodeJS, and .NET binaries.
@@ -971,6 +973,11 @@ class ImageCollector:
             cluster_name: Cluster name for CSV filename (if provided, saves after each image)
             output_dir: Directory to save CSV output
             logger: Optional logger instance for file logging
+            internal_registry_route: External hostname for the OpenShift internal
+                registry. Images referencing the cluster-internal service address
+                are rewritten to use this route for pulling.
+            openshift_token: Bearer token for authenticating to the internal
+                registry route.
             
         Returns:
             Tuple of (number of images analyzed, CSV filepath or None)
@@ -984,7 +991,7 @@ class ImageCollector:
             logger.info("Starting image analysis for Java, NodeJS, and .NET binaries")
         
         # Create analyzer
-        analyzer = ImageAnalyzer(rootfs_path, pull_secret_path)
+        analyzer = ImageAnalyzer(rootfs_path, pull_secret_path, internal_registry_route, openshift_token)
         
         if debug:
             print(f"  [DEBUG] Analyzer rootfs_base: {analyzer.rootfs_base}")

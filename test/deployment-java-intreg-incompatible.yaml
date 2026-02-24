@@ -1,0 +1,41 @@
+---
+# Deployment with Java version that does NOT support cgroups v2
+# Using the ImageStream from the internal registry
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-app-intreg-incompatible
+  namespace: test-java-internalreg
+  labels:
+    app: java-app-intreg-incompatible
+    app.kubernetes.io/name: java-app-intreg-incompatible
+    app.kubernetes.io/part-of: cgroups-v2-test
+    cgroups-v2-compatible: "false"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-app-intreg-incompatible
+  template:
+    metadata:
+      labels:
+        app: java-app-intreg-incompatible
+    spec:
+      containers:
+        - name: java-incompatible
+          image: image-registry.openshift-image-registry.svc:5000/test-java-internalreg/openjdk-8:1.14
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Java version (incompatible with cgroups v2):"
+              java -version
+              echo "Sleeping indefinitely..."
+              sleep infinity
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

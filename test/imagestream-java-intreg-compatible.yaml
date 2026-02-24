@@ -1,0 +1,21 @@
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: openjdk-17
+  namespace: test-java-internalreg
+  labels:
+    app.kubernetes.io/name: openjdk-17
+    app.kubernetes.io/part-of: cgroups-v2-test
+spec:
+  lookupPolicy:
+    local: true
+  tags:
+    - name: latest
+      from:
+        kind: DockerImage
+        name: registry.access.redhat.com/ubi8/openjdk-17:latest
+      importPolicy:
+        scheduled: true
+      referencePolicy:
+        type: Local
