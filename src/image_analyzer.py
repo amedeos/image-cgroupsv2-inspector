@@ -224,9 +224,9 @@ class ImageAnalyzer:
             if debug:
                 print(f"      [DEBUG] Exit code: {result.returncode}")
                 if result.stdout:
-                    print(f"      [DEBUG] stdout: {result.stdout[:200]}")
+                    print(f"      [DEBUG] stdout: {result.stdout[:1000]}")
                 if result.stderr:
-                    print(f"      [DEBUG] stderr: {result.stderr[:200]}")
+                    print(f"      [DEBUG] stderr: {result.stderr[-1000:]}")
             
             return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
@@ -337,7 +337,9 @@ class ImageAnalyzer:
         exit_code, stdout, stderr = self._run_command(cmd, timeout=600, debug=debug)
         
         if exit_code != 0:
-            return False, f"Failed to pull image: {stderr}"
+            error_lines = [l for l in stderr.splitlines() if l.startswith("Error:")]
+            error_detail = error_lines[-1] if error_lines else stderr[-500:]
+            return False, f"Failed to pull image: {error_detail}"
         
         if debug:
             print(f"      [DEBUG] Pull successful")
@@ -372,7 +374,9 @@ class ImageAnalyzer:
         )
         
         if exit_code != 0:
-            return False, "", f"Failed to create container: {stderr}"
+            error_lines = [l for l in stderr.splitlines() if l.startswith("Error:")]
+            error_detail = error_lines[-1] if error_lines else stderr[-500:]
+            return False, "", f"Failed to create container: {error_detail}"
         
         container_id = stdout.strip()
         
@@ -391,7 +395,9 @@ class ImageAnalyzer:
             )
             
             if exit_code != 0:
-                return False, "", f"Failed to export container: {stderr}"
+                error_lines = [l for l in stderr.splitlines() if l.startswith("Error:")]
+                error_detail = error_lines[-1] if error_lines else stderr[-500:]
+                return False, "", f"Failed to export container: {error_detail}"
             
             # Verify tar was created
             if tar_path.exists():
@@ -947,7 +953,7 @@ class ImageAnalyzer:
             success, error = self._pull_image(image_name, debug=debug)
             if not success:
                 result.error = error
-                print(f"    ✗ Pull failed: {error[:100]}")
+                print(f"    ✗ Pull failed: {error[:300]}")
                 return result
             
             print(f"    Exporting container filesystem...")
@@ -956,7 +962,7 @@ class ImageAnalyzer:
             success, tar_path, error = self._create_and_export_container(podman_image, debug=debug)
             if not success:
                 result.error = error
-                print(f"    ✗ Export failed: {error[:100]}")
+                print(f"    ✗ Export failed: {error[:300]}")
                 self._cleanup(podman_image, debug=debug)
                 return result
             
@@ -966,7 +972,7 @@ class ImageAnalyzer:
             success, error = self._extract_tar(tar_path, debug=debug)
             if not success:
                 result.error = error
-                print(f"    ✗ Extract failed: {error[:100]}")
+                print(f"    ✗ Extract failed: {error[:300]}")
                 self._cleanup(podman_image, debug=debug)
                 return result
             

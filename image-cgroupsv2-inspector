@@ -313,6 +313,7 @@ def main() -> int:
             api_url=args.api_url,
             token=args.token,
             env_file=args.env_file,
+            pull_secret_file=args.pull_secret,
             verify_ssl=args.verify_ssl
         )
         
