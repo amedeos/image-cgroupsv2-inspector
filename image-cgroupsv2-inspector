@@ -147,6 +147,15 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--skip-disk-check",
+        dest="skip_disk_check",
+        action="store_true",
+        default=False,
+        help="Skip the 20GB minimum free disk space check. "
+             "A warning will be logged instead of stopping execution."
+    )
+
+    parser.add_argument(
         "--internal-registry-route",
         dest="internal_registry_route",
         type=str,
@@ -232,13 +241,16 @@ def print_banner():
     print(banner)
 
 
-def setup_rootfs(rootfs_path: str, logger: logging.Logger = None) -> bool:
+def setup_rootfs(rootfs_path: str, logger: logging.Logger = None,
+                 skip_disk_check: bool = False) -> bool:
     """
     Set up the rootfs directory with proper permissions and ACLs.
 
     Args:
         rootfs_path: Path where rootfs directory will be created.
         logger: Logger instance for file logging.
+        skip_disk_check: If True, insufficient disk space produces a
+            warning instead of a fatal error.
 
     Returns:
         True if successful, False otherwise.
@@ -250,7 +262,7 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger = None) -> bool:
     manager = RootFSManager(rootfs_path)
     
     # Create rootfs directory with ACLs (includes validation)
-    success, msg = manager.create_rootfs_directory()
+    success, msg = manager.create_rootfs_directory(skip_disk_check=skip_disk_check)
     if not success:
         print(f"✗ Failed to create rootfs: {msg}")
         if logger:
@@ -296,7 +308,8 @@ def main() -> int:
     
     # Handle rootfs path if provided
     if args.rootfs_path:
-        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None):
+        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None,
+                           skip_disk_check=args.skip_disk_check):
             return 1
         
         if args.skip_collection:

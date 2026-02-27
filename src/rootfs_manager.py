@@ -154,9 +154,13 @@ class RootFSManager:
         except Exception as e:
             return False, f"Error checking disk space: {e}"
 
-    def validate_path(self) -> Tuple[bool, str]:
+    def validate_path(self, skip_disk_check: bool = False) -> Tuple[bool, str]:
         """
         Validate that the path is suitable for rootfs creation.
+
+        Args:
+            skip_disk_check: If True, insufficient disk space produces a
+                warning instead of a fatal error.
 
         Returns:
             Tuple of (success, message)
@@ -170,8 +174,16 @@ class RootFSManager:
         # Check free disk space (minimum 20GB required)
         has_space, msg = self.check_free_space()
         if not has_space:
-            return False, msg
-        print(f"✓ {msg}")
+            if skip_disk_check:
+                print(f"⚠ WARNING: {msg}")
+                print(f"  Continuing anyway because --skip-disk-check was specified.")
+            else:
+                return False, (
+                    f"{msg}\n"
+                    f"  Use --skip-disk-check to bypass this check."
+                )
+        else:
+            print(f"✓ {msg}")
         
         # Check ACL support
         acl_support, msg = self.check_filesystem_acl_support()
@@ -181,7 +193,7 @@ class RootFSManager:
         
         return True, "Path is valid for rootfs creation"
 
-    def create_rootfs_directory(self) -> Tuple[bool, str]:
+    def create_rootfs_directory(self, skip_disk_check: bool = False) -> Tuple[bool, str]:
         """
         Create the rootfs directory with proper permissions and ACLs.
 
@@ -190,12 +202,16 @@ class RootFSManager:
         - rwx for the current group
         - SGID bit to ensure files inherit the group
 
+        Args:
+            skip_disk_check: If True, insufficient disk space produces a
+                warning instead of a fatal error.
+
         Returns:
             Tuple of (success, message)
         """
         try:
             # Validate path first
-            valid, msg = self.validate_path()
+            valid, msg = self.validate_path(skip_disk_check=skip_disk_check)
             if not valid:
                 return False, msg
 
