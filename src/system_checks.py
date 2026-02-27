@@ -47,16 +47,22 @@ def check_podman_running() -> Tuple[bool, str]:
     """
     try:
         result = subprocess.run(
-            ["podman", "info", "--format", "{{.Host.Os}}"],
+            ["podman", "info", "--format", "json"],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=30
         )
         
         if result.returncode != 0:
-            return False, f"podman info failed: {result.stderr}"
+            return False, f"podman info failed: {result.stderr.strip()}"
         
-        return True, f"podman is functional (OS: {result.stdout.strip()})"
+        import json
+        try:
+            info = json.loads(result.stdout)
+            host_os = info.get("host", {}).get("os", "unknown")
+            return True, f"podman is functional (OS: {host_os})"
+        except json.JSONDecodeError:
+            return True, "podman is functional"
         
     except subprocess.TimeoutExpired:
         return False, "podman info timed out"
