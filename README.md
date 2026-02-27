@@ -116,6 +116,7 @@ This tool connects to an OpenShift cluster, collects information about all conta
 
 - **Minimum 20GB of free disk space** on the filesystem where `--rootfs-path` is located
 - This space is required for extracting and inspecting container images
+- Use `--skip-disk-check` to bypass this check (a warning will be logged instead of stopping execution)
 
 ## Installation
 
@@ -184,6 +185,7 @@ oc whoami --show-server
 | `--verify-ssl` | Verify SSL certificates (default: False) |
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
+| `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
 | `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
 | `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
 | `--internal-registry-route` | Custom hostname for the OpenShift internal registry route. When not specified, the tool auto-detects the `default-route` from the cluster |
