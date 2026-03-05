@@ -140,6 +140,41 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Container
+
+You can build and run the tool as a container (UBI 9, Python 3.12). The image uses the main script as the entrypoint.
+
+**Build:**
+
+```bash
+podman build -t image-cgroupsv2-inspector -f Containerfile .
+# or: docker build -t image-cgroupsv2-inspector -f Containerfile .
+```
+
+**Run:**
+
+Mount output and, for `--analyze`, a writable rootfs path. Optionally mount `.env` and `.pull-secret` if you use them.
+
+```bash
+# With API URL and token
+podman run --rm -v ./output:/app/output \
+  image-cgroupsv2-inspector --api-url https://api.mycluster.example.com:6443 --token <token>
+
+# Using .env (mount it into the container)
+podman run --rm -v ./.env:/app/.env -v ./output:/app/output \
+  image-cgroupsv2-inspector
+
+# With analysis (mount rootfs path and optionally pull-secret)
+podman run --rm \
+  -v ./.env:/app/.env \
+  -v ./.pull-secret:/app/.pull-secret \
+  -v ./output:/app/output \
+  -v /tmp/rootfs:/tmp/rootfs \
+  image-cgroupsv2-inspector --rootfs-path /tmp/rootfs --analyze
+```
+
+The container runs as root. For image pulls and analysis, podman runs inside the container; you may need appropriate capabilities or privileges (e.g. `--privileged` or volume mounts for `/var/lib/containers`) depending on your environment.
+
 ## Usage
 
 ### Basic Usage
@@ -509,7 +544,9 @@ image-cgroupsv2-inspector/
 ├── requirements.txt           # Python dependencies
 ├── README.md                  # This file
 ├── LICENSE                    # License file
-├── .gitignore                # Git ignore rules
+├── Containerfile              # Container image definition (UBI 9, Python 3.12)
+├── .dockerignore              # Build context exclusions
+├── .gitignore              # Git ignore rules
 ├── .env                      # Credentials (not in git)
 ├── .pull-secret              # Cluster pull secret (not in git)
 ├── output/                   # CSV output directory (not in git)
