@@ -18,17 +18,17 @@ License: See LICENSE file
 """
 
 import argparse
-import sys
-import os
 import logging
+import os
+import sys
 from pathlib import Path
 
 # Add src directory to path
 script_dir = Path(__file__).parent.resolve()
 sys.path.insert(0, str(script_dir))
 
-from src.openshift_client import OpenShiftClient
 from src.image_collector import ImageCollector
+from src.openshift_client import OpenShiftClient
 from src.rootfs_manager import RootFSManager
 from src.system_checks import run_system_checks
 
@@ -55,28 +55,20 @@ Environment Variables:
   OPENSHIFT_TOKEN      Bearer token for authentication
 
 The tool will save credentials to .env file after successful connection.
-        """
+        """,
     )
 
     parser.add_argument(
-        "--api-url",
-        dest="api_url",
-        type=str,
-        help="OpenShift API URL (e.g., https://api.mycluster.example.com:6443)"
+        "--api-url", dest="api_url", type=str, help="OpenShift API URL (e.g., https://api.mycluster.example.com:6443)"
     )
 
-    parser.add_argument(
-        "--token",
-        dest="token",
-        type=str,
-        help="Bearer token for OpenShift authentication"
-    )
+    parser.add_argument("--token", dest="token", type=str, help="Bearer token for OpenShift authentication")
 
     parser.add_argument(
         "--rootfs-path",
         dest="rootfs_path",
         type=str,
-        help="Path where rootfs directory will be created for image extraction"
+        help="Path where rootfs directory will be created for image extraction",
     )
 
     parser.add_argument(
@@ -84,7 +76,7 @@ The tool will save credentials to .env file after successful connection.
         dest="output_dir",
         type=str,
         default="output",
-        help="Directory to save CSV output (default: output)"
+        help="Directory to save CSV output (default: output)",
     )
 
     parser.add_argument(
@@ -92,7 +84,7 @@ The tool will save credentials to .env file after successful connection.
         dest="env_file",
         type=str,
         default=".env",
-        help="Path to .env file for credentials (default: .env)"
+        help="Path to .env file for credentials (default: .env)",
     )
 
     parser.add_argument(
@@ -100,7 +92,7 @@ The tool will save credentials to .env file after successful connection.
         dest="verify_ssl",
         action="store_true",
         default=False,
-        help="Verify SSL certificates (default: False)"
+        help="Verify SSL certificates (default: False)",
     )
 
     parser.add_argument(
@@ -108,7 +100,7 @@ The tool will save credentials to .env file after successful connection.
         dest="skip_collection",
         action="store_true",
         default=False,
-        help="Skip image collection (useful for testing rootfs setup)"
+        help="Skip image collection (useful for testing rootfs setup)",
     )
 
     parser.add_argument(
@@ -116,7 +108,7 @@ The tool will save credentials to .env file after successful connection.
         dest="analyze",
         action="store_true",
         default=False,
-        help="Analyze images for Java/NodeJS/.NET binaries (requires --rootfs-path)"
+        help="Analyze images for Java/NodeJS/.NET binaries (requires --rootfs-path)",
     )
 
     parser.add_argument(
@@ -124,15 +116,16 @@ The tool will save credentials to .env file after successful connection.
         dest="pull_secret",
         type=str,
         default=".pull-secret",
-        help="Path to pull-secret file for image authentication (default: .pull-secret)"
+        help="Path to pull-secret file for image authentication (default: .pull-secret)",
     )
 
     parser.add_argument(
-        "-n", "--namespace",
+        "-n",
+        "--namespace",
         dest="namespace",
         type=str,
         help="Only inspect images in the specified namespace. "
-             "If not provided, all namespaces are inspected (except those excluded by --exclude-namespaces)."
+        "If not provided, all namespaces are inspected (except those excluded by --exclude-namespaces).",
     )
 
     parser.add_argument(
@@ -141,9 +134,9 @@ The tool will save credentials to .env file after successful connection.
         type=str,
         default="openshift-*,kube-*",
         help="Comma-separated list of namespace patterns to exclude. "
-             "Supports glob patterns with * (e.g., 'openshift-*,kube-*'). "
-             "Default: 'openshift-*,kube-*'. "
-             "Ignored when --namespace is specified."
+        "Supports glob patterns with * (e.g., 'openshift-*,kube-*'). "
+        "Default: 'openshift-*,kube-*'. "
+        "Ignored when --namespace is specified.",
     )
 
     parser.add_argument(
@@ -151,8 +144,7 @@ The tool will save credentials to .env file after successful connection.
         dest="skip_disk_check",
         action="store_true",
         default=False,
-        help="Skip the 20GB minimum free disk space check. "
-             "A warning will be logged instead of stopping execution."
+        help="Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution.",
     )
 
     parser.add_argument(
@@ -160,25 +152,17 @@ The tool will save credentials to .env file after successful connection.
         dest="internal_registry_route",
         type=str,
         help="Custom hostname for the OpenShift internal registry route "
-             "(e.g., 'my-registry-openshift-image-registry.apps.example.com'). "
-             "When not specified, the tool auto-detects the 'default-route' from the cluster. "
-             "Use this when the cluster exposes a custom route instead of the default one."
+        "(e.g., 'my-registry-openshift-image-registry.apps.example.com'). "
+        "When not specified, the tool auto-detects the 'default-route' from the cluster. "
+        "Use this when the cluster exposes a custom route instead of the default one.",
     )
 
     parser.add_argument(
-        "-v", "--verbose",
-        dest="verbose",
-        action="store_true",
-        default=False,
-        help="Enable verbose output"
+        "-v", "--verbose", dest="verbose", action="store_true", default=False, help="Enable verbose output"
     )
 
     parser.add_argument(
-        "--log-to-file",
-        dest="log_to_file",
-        action="store_true",
-        default=False,
-        help="Enable logging to file"
+        "--log-to-file", dest="log_to_file", action="store_true", default=False, help="Enable logging to file"
     )
 
     parser.add_argument(
@@ -186,14 +170,10 @@ The tool will save credentials to .env file after successful connection.
         dest="log_file",
         type=str,
         default="image-cgroupsv2-inspector.log",
-        help="Path to log file (default: image-cgroupsv2-inspector.log). Implies --log-to-file"
+        help="Path to log file (default: image-cgroupsv2-inspector.log). Implies --log-to-file",
     )
 
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="%(prog)s 1.0.0"
-    )
+    parser.add_argument("--version", action="version", version="%(prog)s 1.0.0")
 
     return parser.parse_args()
 
@@ -201,32 +181,29 @@ The tool will save credentials to .env file after successful connection.
 def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Logger:
     """
     Set up logging configuration.
-    
+
     Args:
         log_to_file: Whether to enable file logging.
         log_file: Path to the log file.
         verbose: Whether to enable verbose (DEBUG) logging.
-    
+
     Returns:
         Configured logger instance.
     """
     logger = logging.getLogger("image-cgroupsv2-inspector")
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    
+
     # Log format
-    log_format = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    
+    log_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
     if log_to_file:
         # File handler
-        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
         file_handler.setFormatter(log_format)
         logger.addHandler(file_handler)
         print(f"📝 Logging to file: {log_file}")
-    
+
     return logger
 
 
@@ -241,8 +218,7 @@ def print_banner():
     print(banner)
 
 
-def setup_rootfs(rootfs_path: str, logger: logging.Logger = None,
-                 skip_disk_check: bool = False) -> bool:
+def setup_rootfs(rootfs_path: str, logger: logging.Logger | None = None, skip_disk_check: bool = False) -> bool:
     """
     Set up the rootfs directory with proper permissions and ACLs.
 
@@ -258,9 +234,9 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger = None,
     print(f"\n🔧 Setting up rootfs directory at: {rootfs_path}")
     if logger:
         logger.info(f"Setting up rootfs directory at: {rootfs_path}")
-    
+
     manager = RootFSManager(rootfs_path)
-    
+
     # Create rootfs directory with ACLs (includes validation)
     success, msg = manager.create_rootfs_directory(skip_disk_check=skip_disk_check)
     if not success:
@@ -268,7 +244,7 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger = None,
         if logger:
             logger.error(f"Failed to create rootfs: {msg}")
         return False
-    
+
     print(f"\n✓ {msg}")
     if logger:
         logger.info(f"Rootfs setup successful: {msg}")
@@ -278,23 +254,23 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger = None,
 def main() -> int:
     """Main entry point."""
     print_banner()
-    
+
     # Parse arguments
     args = parse_arguments()
-    
+
     # Change to script directory for relative paths
     os.chdir(script_dir)
-    
+
     # Set up logging
     # If --log-file is specified with a non-default value, imply --log-to-file
     log_to_file = args.log_to_file or args.log_file != "image-cgroupsv2-inspector.log"
     logger = setup_logging(log_to_file, args.log_file, args.verbose)
-    
+
     if log_to_file:
         logger.info("=" * 60)
         logger.info("image-cgroupsv2-inspector started")
         logger.info("=" * 60)
-    
+
     # Run system checks (podman, etc.)
     if log_to_file:
         logger.info("Running system checks...")
@@ -305,19 +281,18 @@ def main() -> int:
         return 1
     if log_to_file:
         logger.info("System checks passed")
-    
+
     # Handle rootfs path if provided
     if args.rootfs_path:
-        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None,
-                           skip_disk_check=args.skip_disk_check):
+        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None, skip_disk_check=args.skip_disk_check):
             return 1
-        
+
         if args.skip_collection:
             print("\n✓ Rootfs setup complete. Skipping image collection.")
             if log_to_file:
                 logger.info("Rootfs setup complete. Skipping image collection.")
             return 0
-    
+
     # Create OpenShift client
     try:
         if log_to_file:
@@ -327,9 +302,9 @@ def main() -> int:
             token=args.token,
             env_file=args.env_file,
             pull_secret_file=args.pull_secret,
-            verify_ssl=args.verify_ssl
+            verify_ssl=args.verify_ssl,
         )
-        
+
         # Check if we have credentials
         if not client.api_url or not client.token:
             print("\n✗ Error: OpenShift credentials not provided.")
@@ -339,7 +314,7 @@ def main() -> int:
             if log_to_file:
                 logger.error("OpenShift credentials not provided")
             return 1
-        
+
         # Connect to the cluster
         print("\n🔌 Connecting to OpenShift cluster...")
         if log_to_file:
@@ -347,7 +322,7 @@ def main() -> int:
         client.connect()
         if log_to_file:
             logger.info(f"Connected successfully to cluster: {client.cluster_name}")
-        
+
     except ValueError as e:
         print(f"\n✗ Configuration error: {e}")
         if log_to_file:
@@ -358,7 +333,7 @@ def main() -> int:
         if log_to_file:
             logger.error(f"Connection error: {e}")
         return 1
-    
+
     try:
         # Handle namespace filtering
         if args.namespace:
@@ -376,20 +351,20 @@ def main() -> int:
                 if log_to_file:
                     logger.info(f"Namespace exclusion patterns: {', '.join(exclude_patterns)}")
             collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
-        
+
         # Collect images
         if log_to_file:
             logger.info("Collecting container images from cluster...")
         total = collector.collect_all()
         if log_to_file:
             logger.info(f"Collected {total} containers")
-        
+
         if total == 0:
             print("\n⚠ No containers found in the cluster.")
             if log_to_file:
                 logger.warning("No containers found in the cluster")
             return 0
-        
+
         # Analyze images if requested
         if args.analyze:
             if not args.rootfs_path:
@@ -397,7 +372,7 @@ def main() -> int:
                 if log_to_file:
                     logger.error("--analyze requires --rootfs-path to be specified")
                 return 1
-            
+
             # Check if pull-secret exists
             pull_secret_path = None
             if args.pull_secret and Path(args.pull_secret).exists():
@@ -409,11 +384,11 @@ def main() -> int:
                 print("\n⚠ Warning: No pull-secret found. Some images may fail to pull.")
                 if log_to_file:
                     logger.warning("No pull-secret found. Some images may fail to pull.")
-            
+
             # Get the rootfs path
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
-            
+
             # Determine internal registry route (needed to pull internal images)
             if args.internal_registry_route:
                 internal_registry_route = args.internal_registry_route
@@ -424,54 +399,51 @@ def main() -> int:
                 internal_registry_route = client.get_internal_registry_route()
                 if internal_registry_route and log_to_file:
                     logger.info(f"Auto-detected internal registry route: {internal_registry_route}")
-            
+
             # Analyze images (saves CSV after each image for resumability)
             if log_to_file:
                 logger.info("Starting image analysis...")
             _, csv_path = collector.analyze_images(
-                rootfs_path, 
-                pull_secret_path, 
+                rootfs_path,
+                pull_secret_path,
                 debug=args.verbose,
                 cluster_name=client.cluster_name,
                 output_dir=args.output_dir,
                 logger=logger if log_to_file else None,
                 internal_registry_route=internal_registry_route,
-                openshift_token=client.token
+                openshift_token=client.token,
             )
             if log_to_file:
                 logger.info("Image analysis completed")
         else:
             # Save to CSV (only if not analyzing - analysis saves incrementally)
-            csv_path = collector.save_to_csv(
-                cluster_name=client.cluster_name,
-                output_dir=args.output_dir
-            )
+            csv_path = collector.save_to_csv(cluster_name=client.cluster_name, output_dir=args.output_dir)
             if log_to_file:
                 logger.info(f"Results saved to CSV: {csv_path}")
-        
+
         # Show summary
         df = collector.to_dataframe()
         unique_images = collector.get_unique_images()
-        
+
         print("\n📊 Summary:")
         print(f"   Total containers: {len(df)}")
         print(f"   Unique images: {len(unique_images)}")
         print(f"   Namespaces: {df['namespace'].nunique()}")
         print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
-        
+
         # Show analysis summary if analysis was performed
         if args.analyze:
-            java_found = df[df['java_binary'] != 'None']['java_binary'].count()
-            node_found = df[df['node_binary'] != 'None']['node_binary'].count()
-            dotnet_found = df[df['dotnet_binary'] != 'None']['dotnet_binary'].count()
-            java_compat = df[df['java_cgroup_v2_compatible'] == 'Yes'].shape[0]
-            java_incompat = df[df['java_cgroup_v2_compatible'] == 'No'].shape[0]
-            node_compat = df[df['node_cgroup_v2_compatible'] == 'Yes'].shape[0]
-            node_incompat = df[df['node_cgroup_v2_compatible'] == 'No'].shape[0]
-            dotnet_compat = df[df['dotnet_cgroup_v2_compatible'] == 'Yes'].shape[0]
-            dotnet_incompat = df[df['dotnet_cgroup_v2_compatible'] == 'No'].shape[0]
-            
-            print(f"\n   🔬 Analysis Results:")
+            java_found = df[df["java_binary"] != "None"]["java_binary"].count()
+            node_found = df[df["node_binary"] != "None"]["node_binary"].count()
+            dotnet_found = df[df["dotnet_binary"] != "None"]["dotnet_binary"].count()
+            java_compat = df[df["java_cgroup_v2_compatible"] == "Yes"].shape[0]
+            java_incompat = df[df["java_cgroup_v2_compatible"] == "No"].shape[0]
+            node_compat = df[df["node_cgroup_v2_compatible"] == "Yes"].shape[0]
+            node_incompat = df[df["node_cgroup_v2_compatible"] == "No"].shape[0]
+            dotnet_compat = df[df["dotnet_cgroup_v2_compatible"] == "Yes"].shape[0]
+            dotnet_incompat = df[df["dotnet_cgroup_v2_compatible"] == "No"].shape[0]
+
+            print("\n   🔬 Analysis Results:")
             print(f"      Java found in: {java_found} containers")
             if java_found > 0:
                 print(f"        ✓ cgroup v2 compatible: {java_compat}")
@@ -484,41 +456,41 @@ def main() -> int:
             if dotnet_found > 0:
                 print(f"        ✓ cgroup v2 compatible: {dotnet_compat}")
                 print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
-        
+
         print(f"\n   Output file: {csv_path}")
-        
+
         if args.verbose:
             print("\n📋 Top 10 most used images:")
-            top_images = df['image_name'].value_counts().head(10)
+            top_images = df["image_name"].value_counts().head(10)
             for img, count in top_images.items():
                 print(f"   {count:4d} × {img}")
-        
+
     except Exception as e:
         print(f"\n✗ Error during collection: {e}")
         if log_to_file:
             logger.error(f"Error during collection: {e}")
         if args.verbose:
             import traceback
+
             traceback.print_exc()
             if log_to_file:
                 logger.exception("Full traceback:")
         return 1
-    
+
     finally:
         # Disconnect
         client.disconnect()
         if log_to_file:
             logger.info("Disconnected from OpenShift cluster")
-    
+
     if log_to_file:
         logger.info("=" * 60)
         logger.info("image-cgroupsv2-inspector completed successfully")
         logger.info("=" * 60)
-    
+
     print("\n✓ Done!")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

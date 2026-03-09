@@ -6,16 +6,14 @@ Handles connection to OpenShift cluster via API URL and token.
 import base64
 import json
 import os
-import re
 from pathlib import Path
-from typing import Optional, Tuple
 from urllib.parse import urlparse
 
+import urllib3
 from dotenv import load_dotenv, set_key
 from kubernetes import client
-from kubernetes.client import Configuration, ApiClient
+from kubernetes.client import ApiClient, Configuration
 from kubernetes.client.rest import ApiException
-import urllib3
 
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -27,9 +25,14 @@ class OpenShiftClient:
     Handles authentication via token and API URL.
     """
 
-    def __init__(self, api_url: Optional[str] = None, token: Optional[str] = None, 
-                 env_file: str = ".env", pull_secret_file: str = ".pull-secret",
-                 verify_ssl: bool = False):
+    def __init__(
+        self,
+        api_url: str | None = None,
+        token: str | None = None,
+        env_file: str = ".env",
+        pull_secret_file: str = ".pull-secret",
+        verify_ssl: bool = False,
+    ):
         """
         Initialize the OpenShift client.
 
@@ -43,13 +46,13 @@ class OpenShiftClient:
         self.env_file = Path(env_file)
         self.pull_secret_file = Path(pull_secret_file)
         self.verify_ssl = verify_ssl
-        self._api_client: Optional[ApiClient] = None
-        self._cluster_name: Optional[str] = None
-        
+        self._api_client: ApiClient | None = None
+        self._cluster_name: str | None = None
+
         # Load environment variables from .env file
         if self.env_file.exists():
             load_dotenv(self.env_file)
-        
+
         # Use provided values or fall back to environment variables
         self.api_url = api_url or os.getenv("OPENSHIFT_API_URL")
         self.token = token or os.getenv("OPENSHIFT_TOKEN")
@@ -61,16 +64,16 @@ class OpenShiftClient:
         """
         if not self.api_url:
             return "unknown"
-        
+
         try:
             parsed = urlparse(self.api_url)
             hostname = parsed.hostname or ""
-            
+
             # Remove 'api.' prefix if present
             # Pattern: api.<clustername>.<basedomain> -> <clustername>.<basedomain>
             if hostname.startswith("api."):
                 return hostname[4:]  # Remove 'api.' prefix
-            
+
             # Fallback: return full hostname
             return hostname if hostname else "unknown"
         except Exception:
@@ -89,44 +92,40 @@ class OpenShiftClient:
         """
         if not self.api_url:
             raise ValueError(
-                "OpenShift API URL not provided. "
-                "Pass it as parameter or set OPENSHIFT_API_URL in .env file."
+                "OpenShift API URL not provided. Pass it as parameter or set OPENSHIFT_API_URL in .env file."
             )
-        
+
         if not self.token:
-            raise ValueError(
-                "OpenShift token not provided. "
-                "Pass it as parameter or set OPENSHIFT_TOKEN in .env file."
-            )
+            raise ValueError("OpenShift token not provided. Pass it as parameter or set OPENSHIFT_TOKEN in .env file.")
 
         # Configure the client
         configuration = Configuration()
         configuration.host = self.api_url
         configuration.api_key = {"authorization": f"Bearer {self.token}"}
         configuration.verify_ssl = self.verify_ssl
-        
+
         # Create API client
         self._api_client = ApiClient(configuration)
-        
+
         # Test connection by getting cluster version
         try:
             version_api = client.VersionApi(self._api_client)
             version_info = version_api.get_code()
-            print(f"✓ Connected to OpenShift cluster")
+            print("✓ Connected to OpenShift cluster")
             print(f"  Kubernetes version: {version_info.git_version}")
-            
+
             # Extract and store cluster name
             self._cluster_name = self._extract_cluster_name()
             print(f"  Cluster name: {self._cluster_name}")
-            
+
             # Save credentials to .env file
             self._save_to_env()
-            
+
             # Download and save pull-secret
             self._download_pull_secret()
-            
+
             return True
-            
+
         except Exception as e:
             self._api_client = None
             raise Exception(f"Failed to connect to OpenShift cluster: {e}")
@@ -136,7 +135,7 @@ class OpenShiftClient:
         # Create .env file if it doesn't exist
         if not self.env_file.exists():
             self.env_file.touch()
-        
+
         # Save credentials
         set_key(str(self.env_file), "OPENSHIFT_API_URL", self.api_url)
         set_key(str(self.env_file), "OPENSHIFT_TOKEN", self.token)
@@ -159,40 +158,37 @@ class OpenShiftClient:
 
         try:
             core_v1 = self.get_core_v1_api()
-            
+
             # Get the pull-secret from openshift-config namespace
-            secret = core_v1.read_namespaced_secret(
-                name="pull-secret",
-                namespace="openshift-config"
-            )
-            
+            secret = core_v1.read_namespaced_secret(name="pull-secret", namespace="openshift-config")
+
             # Extract the .dockerconfigjson data
             if secret.data and ".dockerconfigjson" in secret.data:
                 # Decode from base64
                 pull_secret_b64 = secret.data[".dockerconfigjson"]
                 pull_secret_json = base64.b64decode(pull_secret_b64).decode("utf-8")
-                
+
                 # Pretty print the JSON
                 pull_secret_data = json.loads(pull_secret_json)
                 pull_secret_formatted = json.dumps(pull_secret_data, indent=2)
-                
+
                 # Save to file
                 self.pull_secret_file.write_text(pull_secret_formatted)
-                
+
                 # Set restrictive permissions (readable only by owner)
                 os.chmod(self.pull_secret_file, 0o600)
-                
+
                 print(f"✓ Pull secret saved to {self.pull_secret_file}")
                 return True
             else:
-                print(f"⚠ Pull secret found but no .dockerconfigjson data")
+                print("⚠ Pull secret found but no .dockerconfigjson data")
                 return False
-                
+
         except ApiException as e:
             if e.status == 403:
-                print(f"⚠ No permission to read pull-secret (requires cluster-admin)")
+                print("⚠ No permission to read pull-secret (requires cluster-admin)")
             elif e.status == 404:
-                print(f"⚠ Pull secret not found in openshift-config namespace")
+                print("⚠ Pull secret not found in openshift-config namespace")
             else:
                 print(f"⚠ Failed to download pull-secret: {e.reason}")
             return False
@@ -230,10 +226,10 @@ class OpenShiftClient:
         """Get CustomObjectsApi instance (for OpenShift resources like DeploymentConfig)."""
         return client.CustomObjectsApi(self.api_client)
 
-    def get_internal_registry_route(self) -> Optional[str]:
+    def get_internal_registry_route(self) -> str | None:
         """
         Get the default route hostname for the OpenShift internal image registry.
-        
+
         Queries the route.openshift.io API for the 'default-route' in the
         openshift-image-registry namespace.
 
@@ -271,4 +267,3 @@ class OpenShiftClient:
             self._api_client.close()
             self._api_client = None
             print("✓ Disconnected from OpenShift cluster")
-
