@@ -1,6 +1,7 @@
 # image-cgroupsv2-inspector
 
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/amedeos/image-cgroupsv2-inspector)
+[![CI](https://github.com/amedeos/image-cgroupsv2-inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/amedeos/image-cgroupsv2-inspector/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
 
@@ -542,23 +543,32 @@ oc delete namespace test-java test-java-short test-node test-dotnet test-java-dc
 image-cgroupsv2-inspector/
 ├── image-cgroupsv2-inspector  # Main executable
 ├── requirements.txt           # Python dependencies
+├── pyproject.toml             # Project config (ruff, pytest)
 ├── README.md                  # This file
 ├── LICENSE                    # License file
 ├── Containerfile              # Container image definition (UBI 9, Python 3.12)
 ├── .dockerignore              # Build context exclusions
-├── .gitignore              # Git ignore rules
-├── .env                      # Credentials (not in git)
-├── .pull-secret              # Cluster pull secret (not in git)
-├── output/                   # CSV output directory (not in git)
+├── .gitignore                 # Git ignore rules
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # GitHub Actions CI pipeline
+├── .env                       # Credentials (not in git)
+├── .pull-secret               # Cluster pull secret (not in git)
+├── output/                    # CSV output directory (not in git)
 │   └── <cluster>-<datetime>.csv
 ├── src/
 │   ├── __init__.py
-│   ├── openshift_client.py   # OpenShift connection handling
-│   ├── image_collector.py    # Image collection logic
-│   ├── image_analyzer.py     # Image analysis for cgroups v2
-│   ├── rootfs_manager.py     # RootFS directory management
-│   └── system_checks.py      # System requirements verification
-└── test/                     # Test Kubernetes manifests
+│   ├── openshift_client.py    # OpenShift connection handling
+│   ├── image_collector.py     # Image collection logic
+│   ├── image_analyzer.py      # Image analysis for cgroups v2
+│   ├── rootfs_manager.py      # RootFS directory management
+│   └── system_checks.py       # System requirements verification
+├── tests/                     # Unit tests (pytest)
+│   ├── __init__.py
+│   ├── test_image_analyzer.py # Version parsing & compatibility checks
+│   ├── test_image_collector.py# Namespace exclusion, label selectors
+│   └── test_openshift_client.py# Cluster name extraction
+└── test/                      # Test Kubernetes manifests
     ├── namespace-java.yaml
     ├── namespace-java-short.yaml
     ├── namespace-node.yaml
@@ -577,6 +587,33 @@ image-cgroupsv2-inspector/
     ├── imagestream-java-intreg-incompatible.yaml
     ├── deployment-java-intreg-compatible.yaml
     └── deployment-java-intreg-incompatible.yaml
+```
+
+## Development
+
+### CI Pipeline
+
+The project uses [GitHub Actions](https://github.com/amedeos/image-cgroupsv2-inspector/actions) with three stages:
+
+1. **Lint** — [ruff](https://docs.astral.sh/ruff/) for linting and formatting
+2. **Test** — [pytest](https://docs.pytest.org/) with coverage reporting
+3. **Container Build** — validates the `Containerfile` builds successfully
+
+### Running Locally
+
+```bash
+# Install dev dependencies
+pip install ruff pytest pytest-cov
+
+# Lint
+ruff check .
+ruff format --check .
+
+# Run tests
+pytest tests/ -v
+
+# Run tests with coverage
+pytest tests/ -v --cov=src --cov-report=term-missing
 ```
 
 ## Contributing
