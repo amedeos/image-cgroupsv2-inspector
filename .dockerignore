@@ -1,0 +1,31 @@
+# Credentials and secrets (never send to build context)
+.env
+.pull-secret
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Build output and logs
+output/
+*.log
+image-cgroupsv2-inspector.log
+
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# IDE and editor
+.idea/
+.vscode/
+.cursor/
+
+# Test and local artifacts
+rootfs/
