@@ -353,7 +353,7 @@ oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"
 Or apply the provided YAML:
 
 ```bash
-oc apply -f test/registry-default-route.yaml
+oc apply -f manifests/cluster/registry-default-route.yaml
 ```
 
 ### cgroup v2 Minimum Versions
@@ -445,7 +445,7 @@ This setup ensures the user can create, modify, and delete files in the rootfs d
 
 ## Test Resources
 
-The `test/` directory contains sample Kubernetes manifests to test the cgroups v2 compatibility detection on a real OpenShift cluster.
+The `manifests/cluster/` directory contains sample Kubernetes manifests to test the cgroups v2 compatibility detection on a real OpenShift cluster.
 
 ### Test Files
 
@@ -477,37 +477,37 @@ The `test/` directory contains sample Kubernetes manifests to test the cgroups v
 
 ```bash
 # Deploy Java test resources (FQDN images)
-oc apply -f test/namespace-java.yaml
-oc apply -f test/deployment-java-compatible.yaml
-oc apply -f test/deployment-java-incompatible.yaml
+oc apply -f manifests/cluster/namespace-java.yaml
+oc apply -f manifests/cluster/deployment-java-compatible.yaml
+oc apply -f manifests/cluster/deployment-java-incompatible.yaml
 
 # Deploy Java test resources (short-name images)
-oc apply -f test/namespace-java-short.yaml
-oc apply -f test/deployment-java-short-compatible.yaml
-oc apply -f test/deployment-java-short-incompatible.yaml
+oc apply -f manifests/cluster/namespace-java-short.yaml
+oc apply -f manifests/cluster/deployment-java-short-compatible.yaml
+oc apply -f manifests/cluster/deployment-java-short-incompatible.yaml
 
 # Deploy Node.js test resources
-oc apply -f test/namespace-node.yaml
-oc apply -f test/deployment-node-compatible.yaml
-oc apply -f test/deployment-node-incompatible.yaml
+oc apply -f manifests/cluster/namespace-node.yaml
+oc apply -f manifests/cluster/deployment-node-compatible.yaml
+oc apply -f manifests/cluster/deployment-node-incompatible.yaml
 
 # Deploy .NET test resources
-oc apply -f test/namespace-dotnet.yaml
-oc apply -f test/deployment-dotnet-compatible.yaml
-oc apply -f test/deployment-dotnet-incompatible.yaml
+oc apply -f manifests/cluster/namespace-dotnet.yaml
+oc apply -f manifests/cluster/deployment-dotnet-compatible.yaml
+oc apply -f manifests/cluster/deployment-dotnet-incompatible.yaml
 
 # Deploy DeploymentConfig test resources (OpenShift)
-oc apply -f test/namespace-java-dc.yaml
-oc apply -f test/deploymentconfig-java-compatible.yaml
-oc apply -f test/deploymentconfig-java-incompatible.yaml
+oc apply -f manifests/cluster/namespace-java-dc.yaml
+oc apply -f manifests/cluster/deploymentconfig-java-compatible.yaml
+oc apply -f manifests/cluster/deploymentconfig-java-incompatible.yaml
 
 # Deploy internal registry test resources
-oc apply -f test/registry-default-route.yaml
-oc apply -f test/namespace-java-intreg.yaml
-oc apply -f test/imagestream-java-intreg-compatible.yaml
-oc apply -f test/imagestream-java-intreg-incompatible.yaml
-oc apply -f test/deployment-java-intreg-compatible.yaml
-oc apply -f test/deployment-java-intreg-incompatible.yaml
+oc apply -f manifests/cluster/registry-default-route.yaml
+oc apply -f manifests/cluster/namespace-java-intreg.yaml
+oc apply -f manifests/cluster/imagestream-java-intreg-compatible.yaml
+oc apply -f manifests/cluster/imagestream-java-intreg-incompatible.yaml
+oc apply -f manifests/cluster/deployment-java-intreg-compatible.yaml
+oc apply -f manifests/cluster/deployment-java-intreg-incompatible.yaml
 
 # Verify pods are running
 oc get pods -n test-java
@@ -568,25 +568,29 @@ image-cgroupsv2-inspector/
 │   ├── test_image_analyzer.py # Version parsing & compatibility checks
 │   ├── test_image_collector.py# Namespace exclusion, label selectors
 │   └── test_openshift_client.py# Cluster name extraction
-└── test/                      # Test Kubernetes manifests
-    ├── namespace-java.yaml
-    ├── namespace-java-short.yaml
-    ├── namespace-node.yaml
-    ├── namespace-dotnet.yaml
-    ├── deployment-java-compatible.yaml
-    ├── deployment-java-incompatible.yaml
-    ├── deployment-java-short-compatible.yaml
-    ├── deployment-java-short-incompatible.yaml
-    ├── deployment-node-compatible.yaml
-    ├── deployment-node-incompatible.yaml
-    ├── deployment-dotnet-compatible.yaml
-    ├── deployment-dotnet-incompatible.yaml
-    ├── namespace-java-intreg.yaml
-    ├── registry-default-route.yaml
-    ├── imagestream-java-intreg-compatible.yaml
-    ├── imagestream-java-intreg-incompatible.yaml
-    ├── deployment-java-intreg-compatible.yaml
-    └── deployment-java-intreg-incompatible.yaml
+└── manifests/
+│   └── cluster/               # Sample Kubernetes manifests (cluster test scenarios)
+│       ├── namespace-java.yaml
+│       ├── namespace-java-dc.yaml
+│       ├── namespace-java-intreg.yaml
+│       ├── namespace-java-short.yaml
+│       ├── namespace-node.yaml
+│       ├── namespace-dotnet.yaml
+│       ├── registry-default-route.yaml
+│       ├── deployment-java-compatible.yaml
+│       ├── deployment-java-incompatible.yaml
+│       ├── deployment-java-intreg-compatible.yaml
+│       ├── deployment-java-intreg-incompatible.yaml
+│       ├── deployment-java-short-compatible.yaml
+│       ├── deployment-java-short-incompatible.yaml
+│       ├── deployment-node-compatible.yaml
+│       ├── deployment-node-incompatible.yaml
+│       ├── deployment-dotnet-compatible.yaml
+│       ├── deployment-dotnet-incompatible.yaml
+│       ├── deploymentconfig-java-compatible.yaml
+│       ├── deploymentconfig-java-incompatible.yaml
+│       ├── imagestream-java-intreg-compatible.yaml
+│       └── imagestream-java-intreg-incompatible.yaml
 ```
 
 ## Development
