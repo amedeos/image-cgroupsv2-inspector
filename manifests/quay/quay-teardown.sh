@@ -11,10 +11,17 @@
 #   - podman (for local image cleanup)
 #
 # Usage:
-#   # Remove repos only
+#   # Remove repos only (OAuth token)
 #   ./manifests/quay/quay-teardown.sh \
 #     --registry-url https://quay.lab.example.com \
 #     --token <your-oauth-token> \
+#     --tls-verify false
+#
+#   # Remove repos with robot account
+#   ./manifests/quay/quay-teardown.sh \
+#     --registry-url https://quay.lab.example.com \
+#     --username "myorg+robot" \
+#     --token <robot-token> \
 #     --tls-verify false
 #
 #   # Remove repos and organization without confirmation
@@ -46,6 +53,7 @@ error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 # ---------------------------------------------------------------------------
 REGISTRY_URL=""
 ORG="test-cgroupsv2"
+USERNAME=""
 TOKEN=""
 TLS_VERIFY="true"
 FORCE="false"
@@ -79,6 +87,8 @@ Required:
 
 Optional:
   --org NAME           Quay organization (default: test-cgroupsv2)
+  --username USER      Registry login username (default: \$oauthtoken).
+                       Use org+robotname for robot accounts.
   --tls-verify BOOL    Verify TLS certificates (default: true)
   --force              Delete the organization without confirmation
   --help               Show this help message
@@ -87,6 +97,10 @@ Examples:
   $(basename "$0") \\
     --registry-url https://quay.lab.example.com \\
     --token my-token --tls-verify false
+
+  $(basename "$0") \\
+    --registry-url https://quay.lab.example.com \\
+    --username "myorg+robot" --token robot-token --tls-verify false
 
   $(basename "$0") \\
     --registry-url https://quay.io \\
@@ -102,6 +116,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --registry-url) REGISTRY_URL="$2"; shift 2 ;;
         --org)          ORG="$2";          shift 2 ;;
+        --username)     USERNAME="$2";     shift 2 ;;
         --token)        TOKEN="$2";        shift 2 ;;
         --tls-verify)   TLS_VERIFY="$2";   shift 2 ;;
         --force)        FORCE="true";      shift   ;;

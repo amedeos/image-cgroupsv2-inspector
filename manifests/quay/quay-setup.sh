@@ -11,10 +11,18 @@
 #   - curl   (for Quay API calls)
 #
 # Usage:
-#   # Self-hosted Quay with self-signed cert
+#   # Self-hosted Quay with self-signed cert (OAuth token)
 #   ./manifests/quay/quay-setup.sh \
 #     --registry-url https://quay.lab.example.com \
 #     --token <your-oauth-token> \
+#     --tls-verify false
+#
+#   # Self-hosted Quay with robot account
+#   ./manifests/quay/quay-setup.sh \
+#     --registry-url https://quay.lab.example.com \
+#     --org myorg \
+#     --username "myorg+robot" \
+#     --token <robot-token> \
 #     --tls-verify false
 #
 #   # quay.io
@@ -45,6 +53,7 @@ error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 # ---------------------------------------------------------------------------
 REGISTRY_URL=""
 ORG="test-cgroupsv2"
+USERNAME=""
 TOKEN=""
 TLS_VERIFY="true"
 DATE_TAG=$(date +%Y%m%d)
@@ -52,6 +61,8 @@ DATE_TAG=$(date +%Y%m%d)
 PUSH_SUCCESS=0
 PUSH_FAIL=0
 FAILED_IMAGES=()
+MAX_RETRIES=3
+RETRY_DELAY=5
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -69,6 +80,8 @@ Required:
 
 Optional:
   --org NAME           Quay organization (default: test-cgroupsv2)
+  --username USER      Registry login username (default: \$oauthtoken).
+                       Use org+robotname for robot accounts.
   --tls-verify BOOL    Verify TLS certificates (default: true)
   --help               Show this help message
 
@@ -76,6 +89,10 @@ Examples:
   $(basename "$0") \\
     --registry-url https://quay.lab.example.com \\
     --token my-token --tls-verify false
+
+  $(basename "$0") \\
+    --registry-url https://quay.lab.example.com \\
+    --username "myorg+robot" --token robot-token --tls-verify false
 
   $(basename "$0") \\
     --registry-url https://quay.io \\
@@ -91,6 +108,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --registry-url) REGISTRY_URL="$2"; shift 2 ;;
         --org)          ORG="$2";          shift 2 ;;
+        --username)     USERNAME="$2";     shift 2 ;;
         --token)        TOKEN="$2";        shift 2 ;;
         --tls-verify)   TLS_VERIFY="$2";   shift 2 ;;
         --help)         usage ;;
@@ -185,8 +203,11 @@ podman_login() {
     host=$(registry_host)
     info "Logging in to ${host} with podman ..."
 
+    local login_user="${USERNAME:-\$oauthtoken}"
+    info "  username: ${login_user}"
+
     if podman login "$host" \
-        --username='$oauthtoken' \
+        --username="$login_user" \
         --password="$TOKEN" \
         --tls-verify="$TLS_VERIFY" 2>&1; then
         success "Podman login to ${host} succeeded."
@@ -228,18 +249,25 @@ pull_tag_push() {
         return 1
     fi
 
-    # Push
-    info "  Pushing ${target} ..."
-    if ! podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
-        error "  Failed to push ${target}"
-        PUSH_FAIL=$((PUSH_FAIL + 1))
-        FAILED_IMAGES+=("${target} (push failed)")
-        return 1
-    fi
+    # Push (with retry)
+    local attempt
+    for attempt in $(seq 1 "$MAX_RETRIES"); do
+        info "  Pushing ${target} (attempt ${attempt}/${MAX_RETRIES}) ..."
+        if podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
+            success "  Pushed ${target}"
+            PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
+            return 0
+        fi
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            warn "  Push failed, retrying in ${RETRY_DELAY}s ..."
+            sleep "$RETRY_DELAY"
+        fi
+    done
 
-    success "  Pushed ${target}"
-    PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
-    return 0
+    error "  Failed to push ${target} after ${MAX_RETRIES} attempts"
+    PUSH_FAIL=$((PUSH_FAIL + 1))
+    FAILED_IMAGES+=("${target} (push failed)")
+    return 1
 }
 
 # Push an additional tag for an image already pulled.
@@ -263,16 +291,24 @@ add_tag() {
         return 1
     fi
 
-    if ! podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
-        error "  Failed to push ${target}"
-        PUSH_FAIL=$((PUSH_FAIL + 1))
-        FAILED_IMAGES+=("${target} (push failed)")
-        return 1
-    fi
+    local attempt
+    for attempt in $(seq 1 "$MAX_RETRIES"); do
+        info "  Pushing ${target} (attempt ${attempt}/${MAX_RETRIES}) ..."
+        if podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
+            success "  Pushed ${target}"
+            PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
+            return 0
+        fi
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            warn "  Push failed, retrying in ${RETRY_DELAY}s ..."
+            sleep "$RETRY_DELAY"
+        fi
+    done
 
-    success "  Pushed ${target}"
-    PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
-    return 0
+    error "  Failed to push ${target} after ${MAX_RETRIES} attempts"
+    PUSH_FAIL=$((PUSH_FAIL + 1))
+    FAILED_IMAGES+=("${target} (push failed)")
+    return 1
 }
 
 # ---------------------------------------------------------------------------
