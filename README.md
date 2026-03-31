@@ -526,10 +526,10 @@ The `manifests/quay/` directory contains shell scripts that populate a Quay regi
 
 | Script | Description |
 |--------|-------------|
-| `quay-setup.sh` | Pulls upstream images and pushes them to a Quay organization with multiple tags |
-| `quay-teardown.sh` | Deletes the test repositories, optionally the organization, and cleans up local images |
+| `quay-setup.sh` | Verifies the Quay organization exists, then pulls upstream images and pushes them with multiple tags |
+| `quay-teardown.sh` | Deletes the test repositories and cleans up local images (the organization is never deleted) |
 
-**Prerequisites:** `podman` and `curl`.
+**Prerequisites:** `podman` and `curl`. The Quay organization must already exist before running the setup script.
 
 #### Setup
 
@@ -552,18 +552,19 @@ The `manifests/quay/` directory contains shell scripts that populate a Quay regi
 #### Teardown
 
 ```bash
-# Remove repos (prompts before deleting org)
+# Remove test repos and local images
 ./manifests/quay/quay-teardown.sh \
   --registry-url https://quay.example.com \
   --org my-test-org \
   --token <your-oauth-token>
 
-# Remove repos and org without confirmation
+# With robot account and self-signed cert
 ./manifests/quay/quay-teardown.sh \
   --registry-url https://quay.example.com \
   --org my-test-org \
-  --token <your-oauth-token> \
-  --force
+  --username "my-test-org+robot" \
+  --token <robot-token> \
+  --tls-verify false
 ```
 
 The setup script is idempotent and includes retry logic (3 attempts) for push operations. Run `--help` on either script for full option details.
@@ -643,7 +644,7 @@ image-cgroupsv2-inspector/
     │   └── imagestream-java-intreg-incompatible.yaml
     └── quay/                  # Quay registry test environment scripts
         ├── quay-setup.sh      # Populate Quay with test images
-        └── quay-teardown.sh   # Remove test images and organization
+        └── quay-teardown.sh   # Remove test repos and local images
 ```
 
 ## Development

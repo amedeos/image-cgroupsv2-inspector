@@ -163,10 +163,10 @@ curl_opts() {
 }
 
 # ---------------------------------------------------------------------------
-# Quay API: create organization
+# Quay API: verify the organization exists
 # ---------------------------------------------------------------------------
-create_organization() {
-    info "Creating Quay organization '${ORG}' ..."
+check_organization() {
+    info "Checking that Quay organization '${ORG}' exists ..."
 
     local curl_tls=()
     if [[ "$TLS_VERIFY" == "false" ]]; then
@@ -176,21 +176,20 @@ create_organization() {
     local http_code
     http_code=$(curl -s -o /dev/null -w "%{http_code}" \
         "${curl_tls[@]}" \
-        -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{\"name\": \"${ORG}\"}" \
-        "${REGISTRY_URL}/api/v1/organization/")
+        "${REGISTRY_URL}/api/v1/organization/${ORG}")
 
     case "$http_code" in
-        200|201)
-            success "Organization '${ORG}' created."
+        200)
+            success "Organization '${ORG}' found."
             ;;
-        400)
-            warn "Organization '${ORG}' already exists (HTTP 400). Continuing."
+        404)
+            error "Organization '${ORG}' does not exist. Please create it in Quay before running this script."
+            exit 1
             ;;
         *)
-            warn "Unexpected HTTP ${http_code} when creating organization. Continuing anyway."
+            error "Unable to verify organization '${ORG}' (HTTP ${http_code}). Check your --registry-url and --token."
+            exit 1
             ;;
     esac
 }
@@ -410,7 +409,7 @@ main() {
 
     validate_args
     check_prerequisites
-    create_organization
+    check_organization
     podman_login
     push_test_images
     print_summary

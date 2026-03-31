@@ -3,8 +3,8 @@
 # quay-teardown.sh — Remove all test resources created by quay-setup.sh.
 #
 # Part of the image-cgroupsv2-inspector project (issue #28, epic #21).
-# Deletes Quay repositories, optionally the organization, and cleans up
-# local podman images.
+# Deletes Quay test repositories and cleans up local podman images.
+# The organization itself is never deleted.
 #
 # Prerequisites:
 #   - curl   (for Quay API calls)
@@ -23,13 +23,6 @@
 #     --username "myorg+robot" \
 #     --token <robot-token> \
 #     --tls-verify false
-#
-#   # Remove repos and organization without confirmation
-#   ./manifests/quay/quay-teardown.sh \
-#     --registry-url https://quay.io \
-#     --org my-test-org \
-#     --token <your-oauth-token> \
-#     --force
 #
 ###############################################################################
 set -euo pipefail
@@ -56,7 +49,6 @@ ORG="test-cgroupsv2"
 USERNAME=""
 TOKEN=""
 TLS_VERIFY="true"
-FORCE="false"
 
 DELETE_SUCCESS=0
 DELETE_FAIL=0
@@ -90,7 +82,6 @@ Optional:
   --username USER      Registry login username (default: \$oauthtoken).
                        Use org+robotname for robot accounts.
   --tls-verify BOOL    Verify TLS certificates (default: true)
-  --force              Delete the organization without confirmation
   --help               Show this help message
 
 Examples:
@@ -101,10 +92,6 @@ Examples:
   $(basename "$0") \\
     --registry-url https://quay.lab.example.com \\
     --username "myorg+robot" --token robot-token --tls-verify false
-
-  $(basename "$0") \\
-    --registry-url https://quay.io \\
-    --org my-test-org --token my-token --force
 EOF
     exit 0
 }
@@ -119,7 +106,6 @@ while [[ $# -gt 0 ]]; do
         --username)     USERNAME="$2";     shift 2 ;;
         --token)        TOKEN="$2";        shift 2 ;;
         --tls-verify)   TLS_VERIFY="$2";   shift 2 ;;
-        --force)        FORCE="true";      shift   ;;
         --help)         usage ;;
         *)
             error "Unknown option: $1"
@@ -213,47 +199,6 @@ delete_all_repositories() {
 }
 
 # ---------------------------------------------------------------------------
-# Delete the organization (with confirmation unless --force)
-# ---------------------------------------------------------------------------
-delete_organization() {
-    if [[ "$FORCE" != "true" ]]; then
-        echo ""
-        warn "About to delete the Quay organization '${ORG}'."
-        read -r -p "Are you sure? (y/N) " answer
-        if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
-            info "Skipping organization deletion."
-            return
-        fi
-    fi
-
-    local curl_tls=()
-    if [[ "$TLS_VERIFY" == "false" ]]; then
-        curl_tls=(-k)
-    fi
-
-    info "Deleting organization '${ORG}' ..."
-
-    local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-        "${curl_tls[@]}" \
-        -X DELETE \
-        -H "Authorization: Bearer ${TOKEN}" \
-        "${REGISTRY_URL}/api/v1/organization/${ORG}")
-
-    case "$http_code" in
-        200|204)
-            success "Organization '${ORG}' deleted."
-            ;;
-        404)
-            warn "Organization '${ORG}' not found (HTTP 404). Skipping."
-            ;;
-        *)
-            error "Failed to delete organization '${ORG}' (HTTP ${http_code})."
-            ;;
-    esac
-}
-
-# ---------------------------------------------------------------------------
 # Clean up local podman images
 # ---------------------------------------------------------------------------
 cleanup_local_images() {
@@ -333,7 +278,6 @@ main() {
     validate_args
     check_prerequisites
     delete_all_repositories
-    delete_organization
     cleanup_local_images
     print_summary
 
