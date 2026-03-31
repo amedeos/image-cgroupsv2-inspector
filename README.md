@@ -445,6 +445,8 @@ This setup ensures the user can create, modify, and delete files in the rootfs d
 
 ## Test Resources
 
+### OpenShift Cluster
+
 The `manifests/cluster/` directory contains sample Kubernetes manifests to test the cgroups v2 compatibility detection on a real OpenShift cluster.
 
 ### Test Files
@@ -518,6 +520,55 @@ oc get pods -n test-java-dc
 oc get pods -n test-java-internalreg
 ```
 
+### Quay Registry
+
+The `manifests/quay/` directory contains shell scripts that populate a Quay registry with test container images for cgroups v2 compatibility testing. This is the registry-scan counterpart to the OpenShift manifests above.
+
+| Script | Description |
+|--------|-------------|
+| `quay-setup.sh` | Verifies the Quay organization exists, then pulls upstream images and pushes them with multiple tags |
+| `quay-teardown.sh` | Deletes the test repositories and cleans up local images (the organization is never deleted) |
+
+**Prerequisites:** `podman` and `curl`. The Quay organization must already exist before running the setup script.
+
+#### Setup
+
+```bash
+# With OAuth token
+./manifests/quay/quay-setup.sh \
+  --registry-url https://quay.example.com \
+  --org my-test-org \
+  --token <your-oauth-token>
+
+# With robot account and self-signed cert
+./manifests/quay/quay-setup.sh \
+  --registry-url https://quay.example.com \
+  --org my-test-org \
+  --username "my-test-org+robot" \
+  --token <robot-token> \
+  --tls-verify false
+```
+
+#### Teardown
+
+```bash
+# Remove test repos and local images
+./manifests/quay/quay-teardown.sh \
+  --registry-url https://quay.example.com \
+  --org my-test-org \
+  --token <your-oauth-token>
+
+# With robot account and self-signed cert
+./manifests/quay/quay-teardown.sh \
+  --registry-url https://quay.example.com \
+  --org my-test-org \
+  --username "my-test-org+robot" \
+  --token <robot-token> \
+  --tls-verify false
+```
+
+The setup script is idempotent and includes retry logic (3 attempts) for push operations. Run `--help` on either script for full option details.
+
 ### Running Analysis on Test Resources
 
 ```bash
@@ -569,28 +620,31 @@ image-cgroupsv2-inspector/
 │   ├── test_image_collector.py# Namespace exclusion, label selectors
 │   └── test_openshift_client.py# Cluster name extraction
 └── manifests/
-│   └── cluster/               # Sample Kubernetes manifests (cluster test scenarios)
-│       ├── namespace-java.yaml
-│       ├── namespace-java-dc.yaml
-│       ├── namespace-java-intreg.yaml
-│       ├── namespace-java-short.yaml
-│       ├── namespace-node.yaml
-│       ├── namespace-dotnet.yaml
-│       ├── registry-default-route.yaml
-│       ├── deployment-java-compatible.yaml
-│       ├── deployment-java-incompatible.yaml
-│       ├── deployment-java-intreg-compatible.yaml
-│       ├── deployment-java-intreg-incompatible.yaml
-│       ├── deployment-java-short-compatible.yaml
-│       ├── deployment-java-short-incompatible.yaml
-│       ├── deployment-node-compatible.yaml
-│       ├── deployment-node-incompatible.yaml
-│       ├── deployment-dotnet-compatible.yaml
-│       ├── deployment-dotnet-incompatible.yaml
-│       ├── deploymentconfig-java-compatible.yaml
-│       ├── deploymentconfig-java-incompatible.yaml
-│       ├── imagestream-java-intreg-compatible.yaml
-│       └── imagestream-java-intreg-incompatible.yaml
+    ├── cluster/               # Sample Kubernetes manifests (cluster test scenarios)
+    │   ├── namespace-java.yaml
+    │   ├── namespace-java-dc.yaml
+    │   ├── namespace-java-intreg.yaml
+    │   ├── namespace-java-short.yaml
+    │   ├── namespace-node.yaml
+    │   ├── namespace-dotnet.yaml
+    │   ├── registry-default-route.yaml
+    │   ├── deployment-java-compatible.yaml
+    │   ├── deployment-java-incompatible.yaml
+    │   ├── deployment-java-intreg-compatible.yaml
+    │   ├── deployment-java-intreg-incompatible.yaml
+    │   ├── deployment-java-short-compatible.yaml
+    │   ├── deployment-java-short-incompatible.yaml
+    │   ├── deployment-node-compatible.yaml
+    │   ├── deployment-node-incompatible.yaml
+    │   ├── deployment-dotnet-compatible.yaml
+    │   ├── deployment-dotnet-incompatible.yaml
+    │   ├── deploymentconfig-java-compatible.yaml
+    │   ├── deploymentconfig-java-incompatible.yaml
+    │   ├── imagestream-java-intreg-compatible.yaml
+    │   └── imagestream-java-intreg-incompatible.yaml
+    └── quay/                  # Quay registry test environment scripts
+        ├── quay-setup.sh      # Populate Quay with test images
+        └── quay-teardown.sh   # Remove test repos and local images
 ```
 
 ## Development
