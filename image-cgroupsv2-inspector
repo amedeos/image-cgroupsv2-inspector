@@ -3,15 +3,16 @@
 image-cgroupsv2-inspector
 =========================
 
-A tool to inspect container images in an OpenShift cluster for cgroups v2 compatibility.
-
-This tool connects to an OpenShift cluster, collects information about all container
-images running in pods, deployments, statefulsets, daemonsets, jobs, and cronjobs,
-and saves the information to a CSV file.
+A tool to inspect container images for cgroups v2 compatibility.
+Supports two modes: OpenShift cluster scan and Quay registry scan.
 
 Usage:
+    # OpenShift mode
     ./image-cgroupsv2-inspector --api-url <URL> --token <TOKEN> [--rootfs-path <PATH>]
     ./image-cgroupsv2-inspector  # Uses credentials from .env file
+
+    # Registry mode
+    ./image-cgroupsv2-inspector --registry-url <URL> --registry-token <TOKEN> --registry-org <ORG>
 
 Author: Amedeo
 License: See LICENSE file
@@ -27,8 +28,12 @@ from pathlib import Path
 script_dir = Path(__file__).parent.resolve()
 sys.path.insert(0, str(script_dir))
 
+from src.analysis_orchestrator import AnalysisOrchestrator
+from src.auth_utils import generate_registry_auth_json
 from src.image_collector import ImageCollector
 from src.openshift_client import OpenShiftClient
+from src.quay_client import QuayClient, QuayClientError
+from src.registry_collector import RegistryCollector
 from src.rootfs_manager import RootFSManager
 from src.system_checks import run_system_checks
 
@@ -37,10 +42,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         prog="image-cgroupsv2-inspector",
-        description="Inspect container images in an OpenShift cluster for cgroups v2 compatibility",
+        description=(
+            "Inspect container images for cgroups v2 compatibility.\n"
+            "Supports two modes: OpenShift cluster scan and Quay registry scan."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+OpenShift Mode Examples:
   # Connect with API URL and token
   ./image-cgroupsv2-inspector --api-url https://api.mycluster.example.com:6443 --token <token>
 
@@ -50,9 +58,31 @@ Examples:
   # Specify rootfs path for image extraction
   ./image-cgroupsv2-inspector --rootfs-path /tmp/images
 
-Environment Variables:
+Registry Mode Examples:
+  # Scan all repos in an org
+  ./image-cgroupsv2-inspector \\
+    --registry-url https://quay.example.com \\
+    --registry-token <token> \\
+    --registry-org myorg \\
+    --rootfs-path /tmp/images --analyze
+
+  # Scan a specific repo, excluding dev tags
+  ./image-cgroupsv2-inspector \\
+    --registry-url https://quay.example.com \\
+    --registry-token <token> \\
+    --registry-org myorg \\
+    --registry-repo myapp \\
+    --exclude-tags "*-dev,*-snapshot" \\
+    --rootfs-path /tmp/images --analyze
+
+Environment Variables (OpenShift Mode):
   OPENSHIFT_API_URL    OpenShift API URL
   OPENSHIFT_TOKEN      Bearer token for authentication
+
+Environment Variables (Registry Mode):
+  QUAY_REGISTRY_URL    Quay registry URL
+  QUAY_REGISTRY_TOKEN  Quay authentication token
+  QUAY_REGISTRY_ORG    Quay organization name
 
 The tool will save credentials to .env file after successful connection.
         """,
@@ -157,6 +187,66 @@ The tool will save credentials to .env file after successful connection.
         "Use this when the cluster exposes a custom route instead of the default one.",
     )
 
+    # --- Registry mode arguments ---
+
+    parser.add_argument(
+        "--registry-url",
+        dest="registry_url",
+        type=str,
+        default="",
+        help="Quay registry URL (e.g., https://quay.example.com). Activates registry scan mode.",
+    )
+
+    parser.add_argument(
+        "--registry-token",
+        dest="registry_token",
+        type=str,
+        default="",
+        help="Bearer token or robot account token for Quay authentication",
+    )
+
+    parser.add_argument(
+        "--registry-org",
+        dest="registry_org",
+        type=str,
+        default="",
+        help="Quay organization to scan (required in registry mode)",
+    )
+
+    parser.add_argument(
+        "--registry-repo",
+        dest="registry_repo",
+        type=str,
+        default=None,
+        help="Specific Quay repository to scan (optional, scans all repos if omitted)",
+    )
+
+    parser.add_argument(
+        "--include-tags",
+        dest="include_tags",
+        type=str,
+        default=None,
+        help='Comma-separated glob patterns for tags to include (e.g., "v*,release-*")',
+    )
+
+    parser.add_argument(
+        "--exclude-tags",
+        dest="exclude_tags",
+        type=str,
+        default=None,
+        help='Comma-separated glob patterns for tags to exclude (e.g., "*-dev,*-snapshot")',
+    )
+
+    parser.add_argument(
+        "--latest-only",
+        dest="latest_only",
+        type=int,
+        default=None,
+        help="Only scan the N most recent tags per repository",
+    )
+
+    # --- General arguments ---
+
     parser.add_argument(
         "-v", "--verbose", dest="verbose", action="store_true", default=False, help="Enable verbose output"
     )
@@ -173,7 +263,7 @@ The tool will save credentials to .env file after successful connection.
         help="Path to log file (default: image-cgroupsv2-inspector.log). Implies --log-to-file",
     )
 
-    parser.add_argument("--version", action="version", version="%(prog)s 1.0.0")
+    parser.add_argument("--version", action="version", version="%(prog)s 2.0.0")
 
     return parser.parse_args()
 
@@ -211,8 +301,9 @@ def print_banner():
     """Print the application banner."""
     banner = """
 ╔══════════════════════════════════════════════════════════════╗
-║           image-cgroupsv2-inspector v1.0.0                   ║
-║     OpenShift Container Image Inspector for cgroups v2       ║
+║           image-cgroupsv2-inspector v2.0.0                   ║
+║  Container Image Inspector for cgroups v2 Compatibility      ║
+║  Supports: OpenShift cluster scan | Quay registry scan       ║
 ╚══════════════════════════════════════════════════════════════╝
     """
     print(banner)
@@ -251,6 +342,33 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger | None = None, skip_di
     return True
 
 
+def _print_analysis_summary(images: list[dict]) -> None:
+    """Print analysis summary from image record dicts."""
+    java_found = sum(1 for img in images if img.get("java_binary", "None") != "None")
+    node_found = sum(1 for img in images if img.get("node_binary", "None") != "None")
+    dotnet_found = sum(1 for img in images if img.get("dotnet_binary", "None") != "None")
+    java_compat = sum(1 for img in images if img.get("java_cgroup_v2_compatible") == "Yes")
+    java_incompat = sum(1 for img in images if img.get("java_cgroup_v2_compatible") == "No")
+    node_compat = sum(1 for img in images if img.get("node_cgroup_v2_compatible") == "Yes")
+    node_incompat = sum(1 for img in images if img.get("node_cgroup_v2_compatible") == "No")
+    dotnet_compat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Yes")
+    dotnet_incompat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "No")
+
+    print("\n   🔬 Analysis Results:")
+    print(f"      Java found in: {java_found} containers")
+    if java_found > 0:
+        print(f"        ✓ cgroup v2 compatible: {java_compat}")
+        print(f"        ✗ cgroup v2 incompatible: {java_incompat}")
+    print(f"      Node.js found in: {node_found} containers")
+    if node_found > 0:
+        print(f"        ✓ cgroup v2 compatible: {node_compat}")
+        print(f"        ✗ cgroup v2 incompatible: {node_incompat}")
+    print(f"      .NET found in: {dotnet_found} containers")
+    if dotnet_found > 0:
+        print(f"        ✓ cgroup v2 compatible: {dotnet_compat}")
+        print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
+
+
 def main() -> int:
     """Main entry point."""
     print_banner()
@@ -282,6 +400,13 @@ def main() -> int:
     if log_to_file:
         logger.info("System checks passed")
 
+    # Load .env early so env vars are available for both modes
+    from dotenv import load_dotenv
+
+    env_file = args.env_file if hasattr(args, "env_file") else ".env"
+    if Path(env_file).exists():
+        load_dotenv(env_file)
+
     # Handle rootfs path if provided
     if args.rootfs_path:
         if not setup_rootfs(args.rootfs_path, logger if log_to_file else None, skip_disk_check=args.skip_disk_check):
@@ -293,7 +418,168 @@ def main() -> int:
                 logger.info("Rootfs setup complete. Skipping image collection.")
             return 0
 
-    # Create OpenShift client
+    # Registry mode env var fallback
+    if not args.registry_url:
+        args.registry_url = os.environ.get("QUAY_REGISTRY_URL", "")
+    if not args.registry_token:
+        args.registry_token = os.environ.get("QUAY_REGISTRY_TOKEN", "")
+    if not args.registry_org:
+        args.registry_org = os.environ.get("QUAY_REGISTRY_ORG", "")
+
+    is_registry_mode = bool(args.registry_url)
+
+    # Mutual exclusion check
+    if args.registry_url and args.api_url:
+        print("\n✗ Error: --registry-url and --api-url are mutually exclusive.")
+        print("  Use --registry-url for Quay registry scan mode.")
+        print("  Use --api-url for OpenShift cluster scan mode.")
+        return 1
+
+    # ── Registry mode ────────────────────────────────────────────
+    if is_registry_mode:
+        if not args.registry_token:
+            print("\n✗ Error: --registry-token is required in registry mode.")
+            return 1
+        if not args.registry_org:
+            print("\n✗ Error: --registry-org is required in registry mode.")
+            return 1
+
+        from urllib.parse import urlparse
+
+        parsed = urlparse(args.registry_url)
+        registry_host = parsed.hostname
+        if parsed.port:
+            registry_host = f"{parsed.hostname}:{parsed.port}"
+
+        print(f"\n🔌 Connecting to Quay registry: {args.registry_url}")
+        if log_to_file:
+            logger.info(f"Connecting to Quay registry: {args.registry_url}")
+        try:
+            quay_client = QuayClient(
+                base_url=args.registry_url,
+                token=args.registry_token,
+                verify_ssl=args.verify_ssl,
+            )
+            quay_client.test_connection()
+            quay_client.get_organization(args.registry_org)
+            print(f"✓ Connected to Quay registry, organization: {args.registry_org}")
+            if log_to_file:
+                logger.info(f"Connected to Quay registry, organization: {args.registry_org}")
+        except QuayClientError as e:
+            print(f"\n✗ Quay connection error: {e}")
+            if log_to_file:
+                logger.error(f"Quay connection error: {e}")
+            return 1
+
+        try:
+            registry_collector = RegistryCollector(
+                quay_client=quay_client,
+                registry_host=registry_host,
+            )
+
+            include_tags = None
+            if args.include_tags:
+                include_tags = [p.strip() for p in args.include_tags.split(",") if p.strip()]
+            exclude_tags = None
+            if args.exclude_tags:
+                exclude_tags = [p.strip() for p in args.exclude_tags.split(",") if p.strip()]
+
+            images = registry_collector.collect_images(
+                org=args.registry_org,
+                repo=args.registry_repo,
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
+                latest_only=args.latest_only,
+            )
+
+            if not images:
+                print("\n⚠ No images found in the registry.")
+                if log_to_file:
+                    logger.warning("No images found in the registry")
+                return 0
+
+            if args.analyze:
+                if not args.rootfs_path:
+                    print("\n✗ Error: --analyze requires --rootfs-path.")
+                    if log_to_file:
+                        logger.error("--analyze requires --rootfs-path")
+                    return 1
+
+                pull_secret_path = None
+                if args.pull_secret and Path(args.pull_secret).exists():
+                    pull_secret_path = args.pull_secret
+                else:
+                    pull_secret_path = generate_registry_auth_json(
+                        registry_host=registry_host,
+                        token=args.registry_token,
+                    )
+                    print(f"🔑 Generated registry auth file: {pull_secret_path}")
+                    if log_to_file:
+                        logger.info(f"Generated registry auth file: {pull_secret_path}")
+
+                manager = RootFSManager(args.rootfs_path)
+                rootfs_path = str(manager.get_rootfs_path().parent)
+
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                output_path = Path(args.output_dir)
+                output_path.mkdir(parents=True, exist_ok=True)
+                csv_filepath = str(output_path / f"{registry_host}-{args.registry_org}-{timestamp}.csv")
+
+                if log_to_file:
+                    logger.info("Starting image analysis...")
+                orchestrator = AnalysisOrchestrator(
+                    rootfs_path=rootfs_path,
+                    pull_secret_path=pull_secret_path,
+                )
+                _, csv_path = orchestrator.analyze_images(
+                    images=images,
+                    csv_filepath=csv_filepath,
+                    debug=args.verbose,
+                    logger=logger if log_to_file else None,
+                )
+                if log_to_file:
+                    logger.info("Image analysis completed")
+            else:
+                csv_path = registry_collector.save_to_csv(images, output_dir=args.output_dir)
+                if log_to_file:
+                    logger.info(f"Results saved to CSV: {csv_path}")
+
+            # Summary (registry mode)
+            print("\n📊 Summary:")
+            print(f"   Source: Quay registry ({registry_host})")
+            print(f"   Organization: {args.registry_org}")
+            print(f"   Total images: {len(images)}")
+            unique_count = len({img["image_name"] for img in images})
+            print(f"   Unique images: {unique_count}")
+
+            if args.analyze:
+                _print_analysis_summary(images)
+
+            print(f"\n   Output file: {csv_path}")
+
+        except Exception as e:
+            print(f"\n✗ Error during registry scan: {e}")
+            if log_to_file:
+                logger.error(f"Error during registry scan: {e}")
+            if args.verbose:
+                import traceback
+
+                traceback.print_exc()
+                if log_to_file:
+                    logger.exception("Full traceback:")
+            return 1
+
+        if log_to_file:
+            logger.info("=" * 60)
+            logger.info("image-cgroupsv2-inspector completed successfully")
+            logger.info("=" * 60)
+
+        print("\n✓ Done!")
+        return 0
+
+    # ── OpenShift mode ───────────────────────────────────────────
     try:
         if log_to_file:
             logger.info("Creating OpenShift client...")
@@ -305,7 +591,6 @@ def main() -> int:
             verify_ssl=args.verify_ssl,
         )
 
-        # Check if we have credentials
         if not client.api_url or not client.token:
             print("\n✗ Error: OpenShift credentials not provided.")
             print("  Please provide --api-url and --token, or set them in .env file.")
@@ -315,7 +600,6 @@ def main() -> int:
                 logger.error("OpenShift credentials not provided")
             return 1
 
-        # Connect to the cluster
         print("\n🔌 Connecting to OpenShift cluster...")
         if log_to_file:
             logger.info(f"Connecting to OpenShift cluster at {client.api_url}")
@@ -337,13 +621,11 @@ def main() -> int:
     try:
         # Handle namespace filtering
         if args.namespace:
-            # Single namespace mode - ignore exclusion patterns
             print(f"\n📋 Inspecting single namespace: {args.namespace}")
             if log_to_file:
                 logger.info(f"Inspecting single namespace: {args.namespace}")
             collector = ImageCollector(client, namespace=args.namespace)
         else:
-            # All namespaces mode - apply exclusion patterns
             exclude_patterns = None
             if args.exclude_namespaces:
                 exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
@@ -352,7 +634,6 @@ def main() -> int:
                     logger.info(f"Namespace exclusion patterns: {', '.join(exclude_patterns)}")
             collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
 
-        # Collect images
         if log_to_file:
             logger.info("Collecting container images from cluster...")
         total = collector.collect_all()
@@ -365,7 +646,6 @@ def main() -> int:
                 logger.warning("No containers found in the cluster")
             return 0
 
-        # Analyze images if requested
         if args.analyze:
             if not args.rootfs_path:
                 print("\n✗ Error: --analyze requires --rootfs-path to be specified.")
@@ -373,7 +653,6 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path to be specified")
                 return 1
 
-            # Check if pull-secret exists
             pull_secret_path = None
             if args.pull_secret and Path(args.pull_secret).exists():
                 pull_secret_path = args.pull_secret
@@ -385,11 +664,9 @@ def main() -> int:
                 if log_to_file:
                     logger.warning("No pull-secret found. Some images may fail to pull.")
 
-            # Get the rootfs path
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
 
-            # Determine internal registry route (needed to pull internal images)
             if args.internal_registry_route:
                 internal_registry_route = args.internal_registry_route
                 print(f"✓ Using custom internal registry route: {internal_registry_route}")
@@ -400,62 +677,53 @@ def main() -> int:
                 if internal_registry_route and log_to_file:
                     logger.info(f"Auto-detected internal registry route: {internal_registry_route}")
 
-            # Analyze images (saves CSV after each image for resumability)
+            image_dicts = [img.to_dict() for img in collector.images]
+
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            output_path_dir = Path(args.output_dir)
+            output_path_dir.mkdir(parents=True, exist_ok=True)
+            csv_filepath = str(output_path_dir / f"{client.cluster_name}-{timestamp}.csv")
+
             if log_to_file:
                 logger.info("Starting image analysis...")
-            _, csv_path = collector.analyze_images(
-                rootfs_path,
-                pull_secret_path,
-                debug=args.verbose,
-                cluster_name=client.cluster_name,
-                output_dir=args.output_dir,
-                logger=logger if log_to_file else None,
+            orchestrator = AnalysisOrchestrator(
+                rootfs_path=rootfs_path,
+                pull_secret_path=pull_secret_path,
                 internal_registry_route=internal_registry_route,
                 openshift_token=client.token,
+            )
+            _, csv_path = orchestrator.analyze_images(
+                images=image_dicts,
+                csv_filepath=csv_filepath,
+                debug=args.verbose,
+                logger=logger if log_to_file else None,
             )
             if log_to_file:
                 logger.info("Image analysis completed")
         else:
-            # Save to CSV (only if not analyzing - analysis saves incrementally)
             csv_path = collector.save_to_csv(cluster_name=client.cluster_name, output_dir=args.output_dir)
             if log_to_file:
                 logger.info(f"Results saved to CSV: {csv_path}")
 
         # Show summary
-        df = collector.to_dataframe()
-        unique_images = collector.get_unique_images()
+        if not args.analyze:
+            image_dicts = [img.to_dict() for img in collector.images]
+
+        import pandas as pd
+
+        df = pd.DataFrame(image_dicts)
 
         print("\n📊 Summary:")
         print(f"   Total containers: {len(df)}")
+        unique_images = df.drop_duplicates(subset=["image_name"])
         print(f"   Unique images: {len(unique_images)}")
         print(f"   Namespaces: {df['namespace'].nunique()}")
         print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
 
-        # Show analysis summary if analysis was performed
         if args.analyze:
-            java_found = df[df["java_binary"] != "None"]["java_binary"].count()
-            node_found = df[df["node_binary"] != "None"]["node_binary"].count()
-            dotnet_found = df[df["dotnet_binary"] != "None"]["dotnet_binary"].count()
-            java_compat = df[df["java_cgroup_v2_compatible"] == "Yes"].shape[0]
-            java_incompat = df[df["java_cgroup_v2_compatible"] == "No"].shape[0]
-            node_compat = df[df["node_cgroup_v2_compatible"] == "Yes"].shape[0]
-            node_incompat = df[df["node_cgroup_v2_compatible"] == "No"].shape[0]
-            dotnet_compat = df[df["dotnet_cgroup_v2_compatible"] == "Yes"].shape[0]
-            dotnet_incompat = df[df["dotnet_cgroup_v2_compatible"] == "No"].shape[0]
-
-            print("\n   🔬 Analysis Results:")
-            print(f"      Java found in: {java_found} containers")
-            if java_found > 0:
-                print(f"        ✓ cgroup v2 compatible: {java_compat}")
-                print(f"        ✗ cgroup v2 incompatible: {java_incompat}")
-            print(f"      Node.js found in: {node_found} containers")
-            if node_found > 0:
-                print(f"        ✓ cgroup v2 compatible: {node_compat}")
-                print(f"        ✗ cgroup v2 incompatible: {node_incompat}")
-            print(f"      .NET found in: {dotnet_found} containers")
-            if dotnet_found > 0:
-                print(f"        ✓ cgroup v2 compatible: {dotnet_compat}")
-                print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
+            _print_analysis_summary(image_dicts)
 
         print(f"\n   Output file: {csv_path}")
 
@@ -478,7 +746,6 @@ def main() -> int:
         return 1
 
     finally:
-        # Disconnect
         client.disconnect()
         if log_to_file:
             logger.info("Disconnected from OpenShift cluster")
