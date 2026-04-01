@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/quay-registry-scan]
   pull_request:
-    branches: [main]
+    branches: [main, feature/quay-registry-scan]
 
 jobs:
   lint:
@@ -47,7 +47,7 @@ jobs:
           pip install pytest pytest-cov
 
       - name: Run tests with coverage
-        run: pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml
+        run: pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=60
 
       - name: Upload coverage report
         if: github.event_name == 'pull_request'
