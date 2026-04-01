@@ -147,12 +147,15 @@ class TestContainerImageInfo:
             object_name="my-deployment",
         )
         d = info.to_dict()
+        assert d["source"] == "openshift"
         assert d["container_name"] == "app"
         assert d["image_name"] == "quay.io/my-org/my-image:latest"
         assert d["namespace"] == "my-app"
         assert d["image_id"] == "sha256:abc123"
         assert d["object_type"] == "Deployment"
         assert d["object_name"] == "my-deployment"
+        assert d["registry_org"] == ""
+        assert d["registry_repo"] == ""
         assert d["java_binary"] == ""
         assert d["java_version"] == ""
         assert d["java_cgroup_v2_compatible"] == ""
@@ -171,6 +174,9 @@ class TestContainerImageInfo:
         info.java_version = "17.0.1"
         info.java_compatible = "Yes"
         d = info.to_dict()
+        assert d["source"] == "openshift"
+        assert d["registry_org"] == ""
+        assert d["registry_repo"] == ""
         assert d["java_binary"] == "/usr/bin/java"
         assert d["java_version"] == "17.0.1"
         assert d["java_cgroup_v2_compatible"] == "Yes"
