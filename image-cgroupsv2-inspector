@@ -505,9 +505,12 @@ def main() -> int:
                         logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_path = None
-                if args.pull_secret and Path(args.pull_secret).exists():
+                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
+                    print(f"🔑 Using pull-secret: {pull_secret_path}")
+                    if log_to_file:
+                        logger.info(f"Using pull-secret: {pull_secret_path}")
                 else:
                     pull_secret_path = generate_registry_auth_json(
                         registry_host=registry_host,

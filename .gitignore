@@ -12,7 +12,7 @@ env/
 .env
 
 # OpenShift pull secret (sensitive data)
-.pull-secret
+.pull-secret*
 
 # Python cache
 __pycache__/
