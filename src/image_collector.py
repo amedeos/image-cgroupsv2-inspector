@@ -25,7 +25,6 @@ from types import SimpleNamespace
 import pandas as pd
 from kubernetes.client.rest import ApiException
 
-from .image_analyzer import ImageAnalysisResult, ImageAnalyzer
 from .openshift_client import OpenShiftClient
 
 # Default namespace patterns to exclude (infrastructure namespaces)
@@ -38,12 +37,15 @@ class ContainerImageInfo:
     def __init__(
         self, container_name: str, image_name: str, namespace: str, image_id: str, object_type: str, object_name: str
     ):
+        self.source: str = "openshift"
         self.container_name = container_name
         self.image_name = image_name
         self.namespace = namespace
         self.image_id = image_id
         self.object_type = object_type
         self.object_name = object_name
+        self.registry_org: str = ""
+        self.registry_repo: str = ""
 
         # Analysis results (populated by ImageAnalyzer)
         self.java_binary: str = ""
@@ -60,10 +62,13 @@ class ContainerImageInfo:
     def to_dict(self) -> dict[str, str]:
         """Convert to dictionary for DataFrame creation."""
         return {
+            "source": self.source,
             "container_name": self.container_name,
             "namespace": self.namespace,
             "object_type": self.object_type,
             "object_name": self.object_name,
+            "registry_org": self.registry_org,
+            "registry_repo": self.registry_repo,
             "image_name": self.image_name,
             "image_id": self.image_id,
             "java_binary": self.java_binary,
@@ -836,12 +841,14 @@ class ImageCollector:
         Returns:
             DataFrame with image information.
         """
-        # Define column order (image_name and image_id, then analysis results)
         columns = [
+            "source",
             "container_name",
             "namespace",
             "object_type",
             "object_name",
+            "registry_org",
+            "registry_repo",
             "image_name",
             "image_id",
             "java_binary",
@@ -898,142 +905,3 @@ class ImageCollector:
         """
         df = self.to_dataframe()
         return df.drop_duplicates(subset=["image_name"]).reset_index(drop=True)
-
-    def analyze_images(
-        self,
-        rootfs_path: str,
-        pull_secret_path: str | None = None,
-        debug: bool = False,
-        cluster_name: str | None = None,
-        output_dir: str = "output",
-        logger: logging.Logger | None = None,
-        internal_registry_route: str | None = None,
-        openshift_token: str | None = None,
-    ) -> tuple:
-        """
-        Analyze all collected images for Java, NodeJS, and .NET binaries.
-
-        This method:
-        1. Gets unique images to avoid re-analyzing the same image
-        2. For each unique image, exports and analyzes the container
-        3. Updates all ContainerImageInfo objects with the analysis results
-        4. Saves CSV after each image (for resumability if interrupted)
-        5. Cleans up after each image to save disk space
-
-        Args:
-            rootfs_path: Path where rootfs directory exists
-            pull_secret_path: Path to pull-secret for authentication
-            debug: Enable debug output
-            cluster_name: Cluster name for CSV filename (if provided, saves after each image)
-            output_dir: Directory to save CSV output
-            logger: Optional logger instance for file logging
-            internal_registry_route: External hostname for the OpenShift internal
-                registry. Images referencing the cluster-internal service address
-                are rewritten to use this route for pulling.
-            openshift_token: Bearer token for authenticating to the internal
-                registry route.
-
-        Returns:
-            Tuple of (number of images analyzed, CSV filepath or None)
-        """
-        print("\n🔬 Analyzing images for Java, NodeJS, and .NET binaries...")
-        print("  (Each image will be pulled, analyzed, and cleaned up)")
-        if cluster_name:
-            print("  (CSV will be saved after each image for resumability)")
-
-        if logger:
-            logger.info("Starting image analysis for Java, NodeJS, and .NET binaries")
-
-        # Create analyzer
-        analyzer = ImageAnalyzer(rootfs_path, pull_secret_path, internal_registry_route, openshift_token)
-
-        if debug:
-            print(f"  [DEBUG] Analyzer rootfs_base: {analyzer.rootfs_base}")
-            print(f"  [DEBUG] Analyzer rootfs_path: {analyzer.rootfs_path}")
-
-        # Get unique images
-        unique_images = set()
-        for img in self.images:
-            # Use image_name as key (image_id might be empty for non-Pod objects)
-            unique_images.add(img.image_name)
-
-        print(f"  Found {len(unique_images)} unique images to analyze")
-
-        # Generate CSV filename once (fixed for this run)
-        csv_filepath = None
-        if cluster_name:
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            filename = f"{cluster_name}-{timestamp}.csv"
-            csv_filepath = output_path / filename
-
-        # Analyze each unique image
-        analyzed_count = 0
-        results_cache: dict[str, ImageAnalysisResult] = {}
-
-        for idx, image_name in enumerate(unique_images, 1):
-            print(f"\n  [{idx}/{len(unique_images)}] Analyzing: {image_name[:70]}...")
-            if logger:
-                logger.info(f"[{idx}/{len(unique_images)}] Analyzing image: {image_name}")
-
-            try:
-                result = analyzer.analyze_image(image_name, debug=debug)
-                results_cache[image_name] = result
-                analyzed_count += 1
-
-                if logger:
-                    logger.info(
-                        f"  Image analysis completed: java={result.java_found}, node={result.node_found}, dotnet={result.dotnet_found}"
-                    )
-
-            except Exception as e:
-                print(f"    Error analyzing image: {e}")
-                if logger:
-                    logger.error(f"  Error analyzing image {image_name}: {e}")
-                import traceback
-
-                if debug:
-                    traceback.print_exc()
-                    if logger:
-                        logger.exception(f"  Full traceback for {image_name}:")
-                # Create error result
-                results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(e))
-
-            # Update all ContainerImageInfo objects with current results
-            for img in self.images:
-                result = results_cache.get(img.image_name)
-                if result:
-                    img.java_binary = result.java_found
-                    img.java_version = result.java_versions
-                    img.java_compatible = result.java_compatible
-                    img.node_binary = result.node_found
-                    img.node_version = result.node_versions
-                    img.node_compatible = result.node_compatible
-                    img.dotnet_binary = result.dotnet_found
-                    img.dotnet_version = result.dotnet_versions
-                    img.dotnet_compatible = result.dotnet_compatible
-                    img.analysis_error = result.error or ""
-
-            # Save CSV after each image analysis (only analyzed images for efficiency)
-            if csv_filepath:
-                # Filter to only include containers whose images have been analyzed
-                analyzed_image_names = set(results_cache.keys())
-                df = self.to_dataframe()
-                df_analyzed = df[df["image_name"].isin(analyzed_image_names)]
-                df_analyzed.to_csv(csv_filepath, index=False)
-                print(f"    💾 Progress saved: {len(df_analyzed)} rows ({idx}/{len(unique_images)} images)")
-
-        print(f"\n✓ Analyzed {analyzed_count} unique images")
-        if logger:
-            logger.info(f"Image analysis completed: {analyzed_count} unique images analyzed")
-
-        # Final save with ALL rows (now all images are analyzed)
-        if csv_filepath:
-            df = self.to_dataframe()
-            df.to_csv(csv_filepath, index=False)
-            print(f"  Final CSV saved to: {csv_filepath} ({len(df)} rows)")
-            if logger:
-                logger.info(f"Final CSV saved to: {csv_filepath} ({len(df)} rows)")
-
-        return analyzed_count, str(csv_filepath) if csv_filepath else None
