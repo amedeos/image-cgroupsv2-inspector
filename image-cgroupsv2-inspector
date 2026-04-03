@@ -202,7 +202,7 @@ The tool will save credentials to .env file after successful connection.
         dest="registry_token",
         type=str,
         default="",
-        help="Bearer token or robot account token for Quay authentication",
+        help="Quay Application Token (OAuth token) for authentication. Required permissions: 'View all visible repositories' + 'Read User Information'",
     )
 
     parser.add_argument(
