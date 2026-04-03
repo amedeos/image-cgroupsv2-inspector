@@ -5,14 +5,16 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
 
-A tool to inspect container images in an OpenShift cluster for cgroups v2 compatibility.
+A tool to inspect container images for cgroups v2 compatibility. Supports scanning images from OpenShift clusters and Quay registries.
 
-This tool connects to an OpenShift cluster, collects information about all container images running in pods, deployments, statefulsets, daemonsets, jobs, and cronjobs, and saves the information to a CSV file.
+This tool connects to an OpenShift cluster or a Quay registry, collects information about container images, and saves the information to a CSV file. In OpenShift mode it discovers images from running workloads (pods, deployments, statefulsets, daemonsets, jobs, and cronjobs). In registry mode it enumerates repositories and tags in a Quay organization via the REST API.
 
 ## Features
 
 - 🔌 Connect to OpenShift cluster via API URL and bearer token
+- 🏭 Connect to Quay registry via API URL and OAuth/robot token
 - 🔑 Automatically download and save cluster pull-secret to `.pull-secret` (skipped if the file already exists)
+- 🔑 Automatic auth.json generation from Quay token for podman pulls
 - 📦 Collect container images from:
   - Pods
   - Deployments
@@ -22,7 +24,9 @@ This tool connects to an OpenShift cluster, collects information about all conta
   - Jobs
   - CronJobs
   - ReplicaSets
-- 💾 Save results to CSV with cluster name and timestamp
+- 📦 Collect container images from Quay organizations and repositories
+- 🏷️ Filter images by tag patterns (include/exclude globs, latest-only)
+- 💾 Save results to CSV with cluster name or registry host and timestamp
 - 🔐 Store credentials in `.env` file for reuse
 - 📁 Create rootfs directory with proper extended ACLs
 - ✅ System checks: verify podman installation and disk space (min 20GB)
@@ -39,7 +43,9 @@ This tool connects to an OpenShift cluster, collects information about all conta
 ## ⚠️ Important Prerequisites
 
 > **Warning**: This tool requires the following conditions to work properly:
->
+
+### OpenShift Mode Prerequisites
+
 > 1. **Registry Accessibility**: All container registries used by the cluster must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registries.
 >
 >    **OpenShift Internal Registry**: Images hosted in the OpenShift internal registry (`image-registry.openshift-image-registry.svc:5000/...`) are also supported. The tool automatically detects these images and rewrites the pull URL to use the registry's external route. By default, the tool auto-detects the `default-route` in the `openshift-image-registry` namespace. If your cluster uses a **custom route** instead of the default one, you can specify it with `--internal-registry-route`:
@@ -58,6 +64,25 @@ This tool connects to an OpenShift cluster, collects information about all conta
 >    The token used to connect to the cluster is also used to authenticate against the internal registry route. Note that `--tls-verify=false` is used automatically for these pulls, as the route typically uses a self-signed certificate.
 >
 > 2. **Pull Secret Configuration**: The cluster's pull-secret must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option. If the pull-secret file already exists at the specified path (default: `.pull-secret`), the tool will use it as-is and **will not** download the cluster pull-secret, avoiding accidental overwrites. The automatic download from the cluster only happens when the file does not exist yet.
+
+### Registry Mode Prerequisites
+
+> 1. **Network Access**: The Quay registry must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registry.
+>
+> 2. **Quay Authentication**: A Quay OAuth token or robot account with `repo:read` permission is required. The token is used both for API access and for generating an `auth.json` file for podman pulls.
+>
+> 3. **podman**: Required for pulling and analyzing container images (same as OpenShift mode).
+
+## Comparison: OpenShift vs Registry Mode
+
+| Feature | OpenShift mode | Registry mode |
+|---------|----------------|---------------|
+| Data source | Running workloads (Pods, Deployments, etc.) | Quay registry API (repos and tags) |
+| Authentication | OpenShift bearer token (`oc whoami -t`) | Quay OAuth token or robot account |
+| Image discovery | Cluster API queries | Quay REST API |
+| Image analysis | Same (podman pull + binary scan) | Same (podman pull + binary scan) |
+| Use case | Post-deployment audit | Pre-deployment assessment / registry hygiene |
+| Pull secret | Cluster pull-secret or custom | Auto-generated from token or custom |
 
 ## Requirements
 
@@ -152,7 +177,7 @@ podman build -t image-cgroupsv2-inspector -f Containerfile .
 # or: docker build -t image-cgroupsv2-inspector -f Containerfile .
 ```
 
-**Run:**
+**Run (OpenShift mode):**
 
 Mount output and, for `--analyze`, a writable rootfs path. Optionally mount `.env` and `.pull-secret` if you use them.
 
@@ -174,11 +199,27 @@ podman run --rm \
   image-cgroupsv2-inspector --rootfs-path /tmp/rootfs --analyze
 ```
 
+**Run (Registry mode):**
+
+```bash
+podman run --rm \
+  -v ./output:/app/output \
+  -v /tmp/rootfs:/tmp/rootfs \
+  image-cgroupsv2-inspector \
+  --registry-url https://quay.io \
+  --registry-token <token> \
+  --registry-org myorg \
+  --rootfs-path /tmp/rootfs \
+  --analyze
+```
+
 The container runs as root. For image pulls and analysis, podman runs inside the container; you may need appropriate capabilities or privileges (e.g. `--privileged` or volume mounts for `/var/lib/containers`) depending on your environment.
 
 ## Usage
 
-### Basic Usage
+### OpenShift Mode
+
+#### Basic Usage
 
 ```bash
 # Connect with API URL and token
@@ -198,7 +239,7 @@ The container runs as root. For image pulls and analysis, podman runs inside the
 ./image-cgroupsv2-inspector --namespace my-namespace --analyze --rootfs-path /tmp/images
 ```
 
-### Getting OpenShift Credentials
+#### Getting OpenShift Credentials
 
 ```bash
 # Get your token
@@ -208,38 +249,7 @@ oc whoami -t
 oc whoami --show-server
 ```
 
-### Command Line Options
-
-| Option | Description |
-|--------|-------------|
-| `--api-url` | OpenShift API URL (e.g., `https://api.mycluster.example.com:6443`) |
-| `--token` | Bearer token for OpenShift authentication |
-| `-n, --namespace` | Only inspect images in the specified namespace. If not provided, all namespaces are inspected |
-| `--rootfs-path` | Path where rootfs directory will be created |
-| `--output-dir` | Directory to save CSV output (default: `output`) |
-| `--env-file` | Path to .env file for credentials (default: `.env`) |
-| `--verify-ssl` | Verify SSL certificates (default: False) |
-| `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
-| `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
-| `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
-| `--pull-secret` | Path to pull-secret file for authentication (default: `.pull-secret`) |
-| `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude (default: `openshift-*,kube-*`). Supports glob patterns with `*`. Ignored when `--namespace` is specified |
-| `--internal-registry-route` | Custom hostname for the OpenShift internal registry route. When not specified, the tool auto-detects the `default-route` from the cluster |
-| `--log-to-file` | Enable logging to file |
-| `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
-| `-v, --verbose` | Enable verbose output |
-| `--version` | Show version number |
-
-### Environment Variables
-
-You can also set credentials via environment variables or `.env` file:
-
-```bash
-OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
-OPENSHIFT_TOKEN=sha256~xxxxx
-```
-
-### Single Namespace Inspection
+#### Single Namespace Inspection
 
 You can limit the image inspection to a specific namespace using the `-n` or `--namespace` option:
 
@@ -259,7 +269,7 @@ When `--namespace` is specified:
 - The `--exclude-namespaces` option is ignored
 - The tool uses namespace-specific API calls (more efficient for large clusters)
 
-### Namespace Exclusion
+#### Namespace Exclusion
 
 By default, infrastructure namespaces matching `openshift-*` and `kube-*` patterns are excluded from image collection. You can customize this behavior with the `--exclude-namespaces` option:
 
@@ -281,6 +291,150 @@ The exclusion patterns support glob-style wildcards:
 - `*` matches any sequence of characters
 - `openshift-*` matches `openshift-etcd`, `openshift-monitoring`, etc.
 - `*-test` matches `app-test`, `service-test`, etc.
+
+### Registry Scan Mode
+
+#### Basic Usage
+
+```bash
+# Scan all repos in an org
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg
+
+# Scan and analyze images
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --rootfs-path /tmp/images \
+  --analyze
+
+# Scan a specific repository
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --registry-repo myapp \
+  --rootfs-path /tmp/images \
+  --analyze
+```
+
+#### Getting Quay Credentials
+
+There are two ways to authenticate with a Quay registry:
+
+1. **OAuth Access Token**: Create via Quay UI → Organization → Applications → Create New Application → Generate Token. Required scopes: `repo:read` (minimum).
+
+2. **Robot Account**: Create via Quay UI → Organization → Robot Accounts → Create Robot Account. Grant read permission on the repositories. The token is shown when creating the robot account.
+
+#### Tag Filtering
+
+```bash
+# Include only tags matching patterns
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --include-tags "v*,release-*"
+
+# Exclude dev/snapshot tags
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --exclude-tags "*-dev,*-snapshot,*-rc*"
+
+# Only scan the 3 most recent tags per repo
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --latest-only 3
+
+# Combine filters
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --exclude-tags "*-dev,latest" \
+  --latest-only 5 \
+  --rootfs-path /tmp/images \
+  --analyze
+```
+
+Tag filtering processing order:
+1. Include patterns (keep matching, default: `*`)
+2. Exclude patterns (remove matching)
+3. Sort by date (most recent first)
+4. Apply latest-only limit
+
+#### Environment Variables
+
+```bash
+QUAY_REGISTRY_URL=https://quay.example.com
+QUAY_REGISTRY_TOKEN=<token>
+QUAY_REGISTRY_ORG=myorg
+```
+
+These can also be set in the `.env` file. CLI arguments override environment variables.
+
+### Command Line Options
+
+**OpenShift mode options:**
+
+| Option | Description |
+|--------|-------------|
+| `--api-url` | OpenShift API URL (e.g., `https://api.mycluster.example.com:6443`) |
+| `--token` | Bearer token for OpenShift authentication |
+| `-n, --namespace` | Only inspect images in the specified namespace. If not provided, all namespaces are inspected (except those excluded by `--exclude-namespaces`) |
+| `--exclude-namespaces` | Comma-separated list of namespace patterns to exclude. Supports glob patterns with `*` (default: `openshift-*,kube-*`). Ignored when `--namespace` is specified |
+| `--internal-registry-route` | Custom hostname for the OpenShift internal registry route. When not specified, the tool auto-detects the `default-route` from the cluster |
+
+**Registry mode options:**
+
+| Option | Description |
+|--------|-------------|
+| `--registry-url` | Quay registry URL (e.g., `https://quay.example.com`). Activates registry scan mode |
+| `--registry-token` | Bearer token or robot account token for Quay authentication |
+| `--registry-org` | Quay organization to scan (required in registry mode) |
+| `--registry-repo` | Specific Quay repository to scan (optional, scans all repos if omitted) |
+| `--include-tags` | Comma-separated glob patterns for tags to include (e.g., `"v*,release-*"`) |
+| `--exclude-tags` | Comma-separated glob patterns for tags to exclude (e.g., `"*-dev,*-snapshot"`) |
+| `--latest-only` | Only scan the N most recent tags per repository |
+
+**Shared options:**
+
+| Option | Description |
+|--------|-------------|
+| `--rootfs-path` | Path where rootfs directory will be created for image extraction |
+| `--output-dir` | Directory to save CSV output (default: `output`) |
+| `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
+| `--pull-secret` | Path to pull-secret file for image authentication (default: `.pull-secret`) |
+| `--verify-ssl` | Verify SSL certificates (default: False) |
+| `--env-file` | Path to .env file for credentials (default: `.env`) |
+| `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
+| `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
+| `--log-to-file` | Enable logging to file |
+| `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
+| `-v, --verbose` | Enable verbose output |
+| `--version` | Show version number |
+
+### Environment Variables
+
+You can also set credentials via environment variables or `.env` file:
+
+```bash
+# OpenShift mode
+OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
+OPENSHIFT_TOKEN=sha256~xxxxx
+
+# Registry mode
+QUAY_REGISTRY_URL=https://quay.example.com
+QUAY_REGISTRY_TOKEN=<token>
+QUAY_REGISTRY_ORG=myorg
+```
 
 ## Short-Name Image Resolution
 
@@ -315,7 +469,7 @@ If your local host doesn't have the same registry search configuration as the cl
 
 When using the `--analyze` flag, the tool:
 
-1. Detects the OpenShift internal registry default-route (if exposed)
+1. Detects the OpenShift internal registry default-route (if exposed) — OpenShift mode only
 2. Pulls each unique container image using podman (rewriting internal registry URLs when needed)
 3. Exports the container filesystem to a temporary directory
 4. Searches for Java, Node.js, and .NET binaries
@@ -386,16 +540,21 @@ oc apply -f manifests/cluster/registry-default-route.yaml
 
 ## Output
 
-The tool generates a CSV file in the `output` directory with the following columns:
+The tool generates a CSV file in the `output` directory (or the path specified by `--output-dir`).
+
+### CSV Columns (unified schema)
 
 | Column | Description |
 |--------|-------------|
-| `container_name` | Name of the container |
-| `namespace` | Kubernetes namespace |
-| `object_type` | Type of object (Pod, Deployment, DeploymentConfig, StatefulSet, etc.) |
-| `object_name` | Name of the parent object |
-| `image_name` | Full image name with tag |
-| `image_id` | Full image ID (when available) |
+| `source` | `"openshift"` or `"registry"` — identifies the scan mode (NEW in v2.0) |
+| `container_name` | Name of the container (OpenShift only) |
+| `namespace` | Kubernetes namespace (OpenShift only) |
+| `object_type` | Type of object — Pod, Deployment, DeploymentConfig, StatefulSet, etc. (OpenShift only) |
+| `object_name` | Name of the parent object (OpenShift only) |
+| `registry_org` | Quay organization name (Registry only, NEW in v2.0) |
+| `registry_repo` | Quay repository name (Registry only, NEW in v2.0) |
+| `image_name` | Full image name with tag (both modes) |
+| `image_id` | Full image ID when available (both modes) |
 | `java_binary` | Path to Java binary found (or "None") |
 | `java_version` | Java version detected |
 | `java_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
@@ -420,7 +579,10 @@ Possible values for these fields:
 - `No` - The runtime is **NOT** compatible with cgroup v2 and requires an upgrade
 - `N/A` - The runtime was not found in the image
 
-Example filename: `mycluster-20241222-143052.csv`
+### Filename Format
+
+- **OpenShift mode**: `{cluster_name}-{YYYYMMDD}-{HHMMSS}.csv`
+- **Registry mode**: `{registry_host}-{org}-{YYYYMMDD}-{HHMMSS}.csv`
 
 ## RootFS Directory
 
@@ -449,7 +611,7 @@ This setup ensures the user can create, modify, and delete files in the rootfs d
 
 The `manifests/cluster/` directory contains sample Kubernetes manifests to test the cgroups v2 compatibility detection on a real OpenShift cluster.
 
-### Test Files
+#### Test Files
 
 | File | Description |
 |------|-------------|
@@ -475,7 +637,7 @@ The `manifests/cluster/` directory contains sample Kubernetes manifests to test 
 | `deployment-java-intreg-compatible.yaml` | Deployment with OpenJDK 17 from internal registry (cgroups v2 compatible) |
 | `deployment-java-intreg-incompatible.yaml` | Deployment with OpenJDK 8 from internal registry (cgroups v2 **incompatible**) |
 
-### Deploying Test Resources
+#### Deploying Test Resources
 
 ```bash
 # Deploy Java test resources (FQDN images)
@@ -520,7 +682,26 @@ oc get pods -n test-java-dc
 oc get pods -n test-java-internalreg
 ```
 
-### Quay Registry
+#### Running Analysis on Test Resources (OpenShift Mode)
+
+```bash
+# Analyze only the test namespaces
+./image-cgroupsv2-inspector \
+  --api-url <URL> \
+  --token <TOKEN> \
+  --rootfs-path /tmp/rootfs \
+  --exclude-namespaces "openshift-*,kube-*" \
+  --analyze \
+  -v
+```
+
+#### Cleanup
+
+```bash
+oc delete namespace test-java test-java-short test-node test-dotnet test-java-dc test-java-internalreg
+```
+
+### Quay Registry Test Environment
 
 The `manifests/quay/` directory contains shell scripts that populate a Quay registry with test container images for cgroups v2 compatibility testing. This is the registry-scan counterpart to the OpenShift manifests above.
 
@@ -569,82 +750,60 @@ The `manifests/quay/` directory contains shell scripts that populate a Quay regi
 
 The setup script is idempotent and includes retry logic (3 attempts) for push operations. Run `--help` on either script for full option details.
 
-### Running Analysis on Test Resources
+#### Running Analysis on Test Resources (Registry Mode)
 
 ```bash
-# Analyze only the test namespaces
 ./image-cgroupsv2-inspector \
-  --api-url <URL> \
-  --token <TOKEN> \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org test-cgroupsv2 \
   --rootfs-path /tmp/rootfs \
-  --exclude-namespaces "openshift-*,kube-*" \
   --analyze \
   -v
-```
-
-### Cleanup
-
-```bash
-oc delete namespace test-java test-java-short test-node test-dotnet test-java-dc test-java-internalreg
 ```
 
 ## Project Structure
 
 ```
 image-cgroupsv2-inspector/
-├── image-cgroupsv2-inspector  # Main executable
-├── requirements.txt           # Python dependencies
-├── pyproject.toml             # Project config (ruff, pytest)
-├── README.md                  # This file
-├── LICENSE                    # License file
-├── Containerfile              # Container image definition (UBI 9, Python 3.12)
-├── .dockerignore              # Build context exclusions
-├── .gitignore                 # Git ignore rules
+├── image-cgroupsv2-inspector   # Main executable (Python 3.12) — v2.0.0
+├── requirements.txt
+├── pyproject.toml              # ruff + pytest config
+├── Containerfile
+├── README.md
+├── LICENSE
 ├── .github/
 │   └── workflows/
-│       └── ci.yml             # GitHub Actions CI pipeline
-├── .env                       # Credentials (not in git)
-├── .pull-secret               # Cluster pull secret (not in git)
-├── output/                    # CSV output directory (not in git)
-│   └── <cluster>-<datetime>.csv
+│       └── ci.yml              # GitHub Actions CI
 ├── src/
 │   ├── __init__.py
-│   ├── openshift_client.py    # OpenShift connection handling
-│   ├── image_collector.py     # Image collection logic
-│   ├── image_analyzer.py      # Image analysis for cgroups v2
-│   ├── rootfs_manager.py      # RootFS directory management
-│   └── system_checks.py       # System requirements verification
-├── tests/                     # Unit tests (pytest)
+│   ├── openshift_client.py     # OpenShift REST API client
+│   ├── image_collector.py      # Collects images from OpenShift workloads
+│   ├── quay_client.py          # Quay REST API client (NEW in v2.0)
+│   ├── registry_collector.py   # Collects images from Quay registry (NEW in v2.0)
+│   ├── analysis_orchestrator.py # Source-agnostic analysis orchestration (NEW in v2.0)
+│   ├── auth_utils.py           # Registry auth.json generation (NEW in v2.0)
+│   ├── image_analyzer.py       # Image analysis for cgroups v2
+│   ├── rootfs_manager.py       # RootFS directory management
+│   └── system_checks.py        # System requirements verification
+├── tests/
 │   ├── __init__.py
-│   ├── test_image_analyzer.py # Version parsing & compatibility checks
-│   ├── test_image_collector.py# Namespace exclusion, label selectors
-│   └── test_openshift_client.py# Cluster name extraction
+│   ├── test_image_analyzer.py
+│   ├── test_image_collector.py
+│   ├── test_openshift_client.py
+│   ├── test_quay_client.py           # NEW in v2.0
+│   ├── test_registry_collector.py    # NEW in v2.0
+│   ├── test_analysis_orchestrator.py # NEW in v2.0
+│   ├── test_auth_utils.py            # NEW in v2.0
+│   └── test_cli_registry.py          # NEW in v2.0
 └── manifests/
-    ├── cluster/               # Sample Kubernetes manifests (cluster test scenarios)
+    ├── cluster/                # OpenShift test manifests
     │   ├── namespace-java.yaml
-    │   ├── namespace-java-dc.yaml
-    │   ├── namespace-java-intreg.yaml
-    │   ├── namespace-java-short.yaml
-    │   ├── namespace-node.yaml
-    │   ├── namespace-dotnet.yaml
-    │   ├── registry-default-route.yaml
     │   ├── deployment-java-compatible.yaml
-    │   ├── deployment-java-incompatible.yaml
-    │   ├── deployment-java-intreg-compatible.yaml
-    │   ├── deployment-java-intreg-incompatible.yaml
-    │   ├── deployment-java-short-compatible.yaml
-    │   ├── deployment-java-short-incompatible.yaml
-    │   ├── deployment-node-compatible.yaml
-    │   ├── deployment-node-incompatible.yaml
-    │   ├── deployment-dotnet-compatible.yaml
-    │   ├── deployment-dotnet-incompatible.yaml
-    │   ├── deploymentconfig-java-compatible.yaml
-    │   ├── deploymentconfig-java-incompatible.yaml
-    │   ├── imagestream-java-intreg-compatible.yaml
-    │   └── imagestream-java-intreg-incompatible.yaml
-    └── quay/                  # Quay registry test environment scripts
-        ├── quay-setup.sh      # Populate Quay with test images
-        └── quay-teardown.sh   # Remove test repos and local images
+    │   └── ...
+    └── quay/                   # Quay test environment scripts (NEW in v2.0)
+        ├── quay-setup.sh
+        └── quay-teardown.sh
 ```
 
 ## Development
@@ -656,6 +815,8 @@ The project uses [GitHub Actions](https://github.com/amedeos/image-cgroupsv2-ins
 1. **Lint** — [ruff](https://docs.astral.sh/ruff/) for linting and formatting
 2. **Test** — [pytest](https://docs.pytest.org/) with coverage reporting
 3. **Container Build** — validates the `Containerfile` builds successfully
+
+The CI pipeline runs on pull requests to `main` and on feature branches.
 
 ### Running Locally
 
@@ -681,4 +842,3 @@ Contributions are welcome! Please feel free to submit issues or pull requests on
 ## License
 
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
-
