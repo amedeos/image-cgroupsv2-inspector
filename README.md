@@ -12,7 +12,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 ## Features
 
 - 🔌 Connect to OpenShift cluster via API URL and bearer token
-- 🏭 Connect to Quay registry via API URL and OAuth/robot token
+- 🏭 Connect to Quay registry via API URL and Application Token
 - 🔑 Automatically download and save cluster pull-secret to `.pull-secret` (skipped if the file already exists)
 - 🔑 Automatic auth.json generation from Quay token for podman pulls
 - 📦 Collect container images from:
@@ -69,7 +69,15 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 
 > 1. **Network Access**: The Quay registry must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registry.
 >
-> 2. **Quay Authentication**: A Quay OAuth token or robot account with `repo:read` permission is required. The token is used both for API access and for generating an `auth.json` file for podman pulls.
+> 2. **Quay Authentication**: A Quay **Application Token** (OAuth token) is required. The token must be created with the following permissions:
+>    - **View all visible repositories**
+>    - **Read User Information**
+>
+>    The token is used both for REST API access and for generating an `auth.json` file for podman pulls.
+>
+>    To create the token: Quay UI → Organization → Applications → Create New Application → Generate Token, then select the two permissions listed above.
+>
+>    **Note:** Robot accounts are **not** supported for the registry scan mode, as the tool requires Quay REST API access (organization and repository listing) which is only available with Application Tokens.
 >
 > 3. **podman**: Required for pulling and analyzing container images (same as OpenShift mode).
 
@@ -78,7 +86,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 | Feature | OpenShift mode | Registry mode |
 |---------|----------------|---------------|
 | Data source | Running workloads (Pods, Deployments, etc.) | Quay registry API (repos and tags) |
-| Authentication | OpenShift bearer token (`oc whoami -t`) | Quay OAuth token or robot account |
+| Authentication | OpenShift bearer token (`oc whoami -t`) | Quay Application Token (OAuth token) |
 | Image discovery | Cluster API queries | Quay REST API |
 | Image analysis | Same (podman pull + binary scan) | Same (podman pull + binary scan) |
 | Use case | Post-deployment audit | Pre-deployment assessment / registry hygiene |
@@ -323,11 +331,13 @@ The exclusion patterns support glob-style wildcards:
 
 #### Getting Quay Credentials
 
-There are two ways to authenticate with a Quay registry:
+A Quay **Application Token** (OAuth token) is required. Robot accounts are **not** supported.
 
-1. **OAuth Access Token**: Create via Quay UI → Organization → Applications → Create New Application → Generate Token. Required scopes: `repo:read` (minimum).
+Create the token via: **Quay UI → Organization → Applications → Create New Application → Generate Token**
 
-2. **Robot Account**: Create via Quay UI → Organization → Robot Accounts → Create Robot Account. Grant read permission on the repositories. The token is shown when creating the robot account.
+Select the following permissions when generating the token:
+- **View all visible repositories**
+- **Read User Information**
 
 #### Tag Filtering
 
@@ -397,7 +407,7 @@ These can also be set in the `.env` file. CLI arguments override environment var
 | Option | Description |
 |--------|-------------|
 | `--registry-url` | Quay registry URL (e.g., `https://quay.example.com`). Activates registry scan mode |
-| `--registry-token` | Bearer token or robot account token for Quay authentication |
+| `--registry-token` | Quay Application Token (OAuth token) for authentication. Required permissions: "View all visible repositories" + "Read User Information" |
 | `--registry-org` | Quay organization to scan (required in registry mode) |
 | `--registry-repo` | Specific Quay repository to scan (optional, scans all repos if omitted) |
 | `--include-tags` | Comma-separated glob patterns for tags to include (e.g., `"v*,release-*"`) |
