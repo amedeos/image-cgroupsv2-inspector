@@ -55,8 +55,8 @@ OpenShift Mode Examples:
   # Use credentials from .env file
   ./image-cgroupsv2-inspector
 
-  # Specify rootfs path for image extraction
-  ./image-cgroupsv2-inspector --rootfs-path /tmp/images
+  # Specify rootfs path for image extraction and analyze
+  ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
 
 Registry Mode Examples:
   # Scan all repos in an org
