@@ -158,7 +158,7 @@ class TestJavaCompatibility:
     # --- Edge cases ---
 
     def test_unknown_version(self, analyzer):
-        assert analyzer._check_java_compatibility("unknown", "OpenJDK") is False
+        assert analyzer._check_java_compatibility("unknown", "OpenJDK") is None
 
     def test_empty_version(self, analyzer):
         assert analyzer._check_java_compatibility("", "OpenJDK") is False
@@ -205,7 +205,7 @@ class TestNodeCompatibility:
         assert analyzer._check_node_compatibility(version) is False
 
     def test_unknown_version(self, analyzer):
-        assert analyzer._check_node_compatibility("unknown") is False
+        assert analyzer._check_node_compatibility("unknown") is None
 
     def test_empty_version(self, analyzer):
         assert analyzer._check_node_compatibility("") is False
@@ -255,7 +255,7 @@ class TestDotnetCompatibility:
         assert analyzer._check_dotnet_compatibility(version) is False
 
     def test_unknown_version(self, analyzer):
-        assert analyzer._check_dotnet_compatibility("unknown") is False
+        assert analyzer._check_dotnet_compatibility("unknown") is None
 
     def test_empty_version(self, analyzer):
         assert analyzer._check_dotnet_compatibility("") is False
@@ -530,6 +530,67 @@ class TestImageAnalysisResult:
             )
         )
         assert result.java_compatible == "No"
+
+    def test_java_unknown_version(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc123")
+        result.java_binaries.append(
+            BinaryInfo(
+                path="/usr/bin/java",
+                version="unknown",
+                version_output="",
+                is_compatible=None,
+                runtime_type="Unknown",
+            )
+        )
+        assert result.java_compatible == "Unknown"
+
+    def test_java_mixed_known_and_unknown(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc123")
+        result.java_binaries.append(
+            BinaryInfo(
+                path="/usr/bin/java",
+                version="17.0.1",
+                version_output="",
+                is_compatible=True,
+                runtime_type="OpenJDK",
+            )
+        )
+        result.java_binaries.append(
+            BinaryInfo(
+                path="/opt/java/bin/java",
+                version="unknown",
+                version_output="",
+                is_compatible=None,
+                runtime_type="Unknown",
+            )
+        )
+        assert result.java_compatible == "Unknown"
+
+    def test_node_unknown_version(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="")
+        result.node_binaries.append(
+            BinaryInfo(
+                path="/usr/local/bin/node",
+                version="unknown",
+                version_output="",
+                is_compatible=None,
+                runtime_type="NodeJS",
+            )
+        )
+        assert result.node_compatible == "Unknown"
+
+    def test_dotnet_unknown_version(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="")
+        result.dotnet_binaries.append(
+            BinaryInfo(
+                path="/usr/share/dotnet/dotnet",
+                version="unknown",
+                version_output="",
+                is_compatible=None,
+                runtime_type=".NET",
+            )
+        )
+        assert result.dotnet_compatible == "Unknown"
 
     def test_node_result(self):
         result = ImageAnalysisResult(image_name="test:latest", image_id="")

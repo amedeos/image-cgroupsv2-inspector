@@ -539,7 +539,8 @@ oc apply -f manifests/cluster/registry-default-route.yaml
 #   🔬 Analysis Results:
 #      Java found in: 45 containers
 #        ✓ cgroup v2 compatible: 30
-#        ✗ cgroup v2 incompatible: 15
+#        ✗ cgroup v2 incompatible: 12
+#        ? cgroup v2 unknown: 3
 #      Node.js found in: 12 containers
 #        ✓ cgroup v2 compatible: 10
 #        ✗ cgroup v2 incompatible: 2
@@ -567,13 +568,13 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `image_id` | Full image ID when available (both modes) |
 | `java_binary` | Path to Java binary found (or "None") |
 | `java_version` | Java version detected |
-| `java_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `java_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
 | `node_binary` | Path to Node.js binary found (or "None") |
 | `node_version` | Node.js version detected |
-| `node_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `node_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
 | `dotnet_binary` | Path to .NET binary found (or "None") |
 | `dotnet_version` | .NET version detected |
-| `dotnet_cgroup_v2_compatible` | "Yes", "No", or "N/A" |
+| `dotnet_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
 | `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images
@@ -587,6 +588,7 @@ The fields that indicate cgroups v2 incompatibility are:
 Possible values for these fields:
 - `Yes` - The runtime is compatible with cgroup v2
 - `No` - The runtime is **NOT** compatible with cgroup v2 and requires an upgrade
+- `Unknown` - The runtime was found but its version could not be determined (e.g. the binary failed to execute inside the container)
 - `N/A` - The runtime was not found in the image
 
 ### Filename Format
