@@ -435,6 +435,17 @@ class TestPathExclusion:
         path = "/home/user/.dotnet/optimizationdata/some-file"
         assert analyzer._is_excluded_path(path) is True
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/opt/app/node_modules/node/bin/node",
+            "/usr/local/lib/node_modules/node/bin/node",
+            "/opt/myapp/runtime/node_modules/node/bin/node",
+        ],
+    )
+    def test_node_modules_excluded(self, analyzer, path):
+        assert analyzer._is_excluded_path(path) is True
+
 
 # ---------------------------------------------------------------------------
 # ImageAnalysisResult properties

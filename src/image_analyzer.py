@@ -136,6 +136,7 @@ class ImageAnalyzer:
     # Paths to exclude - patterns that path must NOT contain
     EXCLUDE_PATH_CONTAINS = [
         "/.dotnet/optimizationdata/",  # .NET optimization data files (not binaries)
+        "/node_modules/",  # npm packages (not actual runtime binaries)
     ]
 
     def _is_excluded_path(self, path: str) -> bool:

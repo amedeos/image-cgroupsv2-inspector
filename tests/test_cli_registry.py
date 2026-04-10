@@ -693,6 +693,27 @@ class TestPrintAnalysisSummary:
         assert "Node.js found in: 1 containers" in out
         assert "incompatible: 1" in out
 
+    def test_counts_unknown(self, capsys):
+        images = [
+            {"java_binary": "/usr/bin/java", "java_cgroup_v2_compatible": "Yes"},
+            {"java_binary": "/usr/bin/java", "java_cgroup_v2_compatible": "Unknown"},
+            {"node_binary": "/usr/bin/node", "node_cgroup_v2_compatible": "Unknown"},
+        ]
+        _print_analysis_summary(images)
+        out = capsys.readouterr().out
+        assert "Java found in: 2 containers" in out
+        assert "compatible: 1" in out
+        assert "? cgroup v2 unknown: 1" in out
+        assert "Node.js found in: 1 containers" in out
+
+    def test_unknown_not_shown_when_zero(self, capsys):
+        images = [
+            {"java_binary": "/usr/bin/java", "java_cgroup_v2_compatible": "Yes"},
+        ]
+        _print_analysis_summary(images)
+        out = capsys.readouterr().out
+        assert "unknown" not in out
+
 
 # ---------------------------------------------------------------------------
 # TestOpenShiftModeNotBroken
