@@ -349,24 +349,33 @@ def _print_analysis_summary(images: list[dict]) -> None:
     dotnet_found = sum(1 for img in images if img.get("dotnet_binary", "None") != "None")
     java_compat = sum(1 for img in images if img.get("java_cgroup_v2_compatible") == "Yes")
     java_incompat = sum(1 for img in images if img.get("java_cgroup_v2_compatible") == "No")
+    java_unknown = sum(1 for img in images if img.get("java_cgroup_v2_compatible") == "Unknown")
     node_compat = sum(1 for img in images if img.get("node_cgroup_v2_compatible") == "Yes")
     node_incompat = sum(1 for img in images if img.get("node_cgroup_v2_compatible") == "No")
+    node_unknown = sum(1 for img in images if img.get("node_cgroup_v2_compatible") == "Unknown")
     dotnet_compat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Yes")
     dotnet_incompat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "No")
+    dotnet_unknown = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Unknown")
 
     print("\n   🔬 Analysis Results:")
     print(f"      Java found in: {java_found} containers")
     if java_found > 0:
         print(f"        ✓ cgroup v2 compatible: {java_compat}")
         print(f"        ✗ cgroup v2 incompatible: {java_incompat}")
+        if java_unknown > 0:
+            print(f"        ? cgroup v2 unknown: {java_unknown}")
     print(f"      Node.js found in: {node_found} containers")
     if node_found > 0:
         print(f"        ✓ cgroup v2 compatible: {node_compat}")
         print(f"        ✗ cgroup v2 incompatible: {node_incompat}")
+        if node_unknown > 0:
+            print(f"        ? cgroup v2 unknown: {node_unknown}")
     print(f"      .NET found in: {dotnet_found} containers")
     if dotnet_found > 0:
         print(f"        ✓ cgroup v2 compatible: {dotnet_compat}")
         print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
+        if dotnet_unknown > 0:
+            print(f"        ? cgroup v2 unknown: {dotnet_unknown}")
 
 
 def main() -> int:
