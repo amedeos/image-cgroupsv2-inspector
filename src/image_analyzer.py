@@ -26,7 +26,7 @@ class BinaryInfo:
     path: str
     version: str
     version_output: str
-    is_compatible: bool
+    is_compatible: bool | None  # None = version unknown, cannot determine
     runtime_type: str  # OpenJDK, IBM Semeru, IBM Java, NodeJS, etc.
 
 
@@ -60,6 +60,8 @@ class ImageAnalysisResult:
         """Return compatibility status for Java."""
         if not self.java_binaries:
             return "N/A"
+        if any(b.is_compatible is None for b in self.java_binaries):
+            return "Unknown"
         compatible = all(b.is_compatible for b in self.java_binaries)
         return "Yes" if compatible else "No"
 
@@ -82,6 +84,8 @@ class ImageAnalysisResult:
         """Return compatibility status for Node."""
         if not self.node_binaries:
             return "N/A"
+        if any(b.is_compatible is None for b in self.node_binaries):
+            return "Unknown"
         compatible = all(b.is_compatible for b in self.node_binaries)
         return "Yes" if compatible else "No"
 
@@ -104,6 +108,8 @@ class ImageAnalysisResult:
         """Return compatibility status for .NET."""
         if not self.dotnet_binaries:
             return "N/A"
+        if any(b.is_compatible is None for b in self.dotnet_binaries):
+            return "Unknown"
         compatible = all(b.is_compatible for b in self.dotnet_binaries)
         return "Yes" if compatible else "No"
 
@@ -582,6 +588,7 @@ class ImageAnalyzer:
                 "podman",
                 "run",
                 "--rm",
+                "--no-healthcheck",
                 "--entrypoint",
                 binary_path,
                 "--privileged",
@@ -648,6 +655,7 @@ class ImageAnalyzer:
                 "podman",
                 "run",
                 "--rm",
+                "--no-healthcheck",
                 "--entrypoint",
                 binary_path,
                 "--privileged",
@@ -679,7 +687,7 @@ class ImageAnalyzer:
 
         return "unknown", output
 
-    def _check_java_compatibility(self, version: str, runtime_type: str) -> bool:
+    def _check_java_compatibility(self, version: str, runtime_type: str) -> bool | None:
         """
         Check if Java version is compatible with cgroup v2.
 
@@ -693,8 +701,10 @@ class ImageAnalyzer:
             runtime_type: Type of Java runtime
 
         Returns:
-            True if compatible
+            True if compatible, False if not, None if version is unknown
         """
+        if version == "unknown":
+            return None
         try:
             # Parse version - handle formats like 1.8.0_372, 11.0.16, 17.0.4.0
             version = version.replace("-b", ".").replace("_", ".")
@@ -755,7 +765,7 @@ class ImageAnalyzer:
         except Exception:
             return False
 
-    def _check_node_compatibility(self, version: str) -> bool:
+    def _check_node_compatibility(self, version: str) -> bool | None:
         """
         Check if Node.js version is compatible with cgroup v2.
 
@@ -765,8 +775,10 @@ class ImageAnalyzer:
             version: Node.js version string
 
         Returns:
-            True if compatible
+            True if compatible, False if not, None if version is unknown
         """
+        if version == "unknown":
+            return None
         try:
             parts = [int(p) for p in version.split(".")]
 
@@ -812,6 +824,7 @@ class ImageAnalyzer:
                 "podman",
                 "run",
                 "--rm",
+                "--no-healthcheck",
                 "--entrypoint",
                 binary_path,
                 "--privileged",
@@ -843,7 +856,7 @@ class ImageAnalyzer:
 
         return "unknown", output
 
-    def _check_dotnet_compatibility(self, version: str) -> bool:
+    def _check_dotnet_compatibility(self, version: str) -> bool | None:
         """
         Check if .NET version is compatible with cgroup v2.
 
@@ -855,8 +868,10 @@ class ImageAnalyzer:
             version: .NET version string (e.g., "8.0.122", "3.0.100")
 
         Returns:
-            True if compatible (version >= 5.0)
+            True if compatible (version >= 5.0), False if not, None if version is unknown
         """
+        if version == "unknown":
+            return None
         try:
             parts = [int(p) for p in version.split(".")]
 
@@ -1100,17 +1115,17 @@ class ImageAnalyzer:
             # Report findings
             if result.java_binaries:
                 for b in result.java_binaries:
-                    compat = "✓" if b.is_compatible else "✗"
+                    compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
                     print(f"      {compat} Java ({b.runtime_type}): {b.version} at {b.path}")
 
             if result.node_binaries:
                 for b in result.node_binaries:
-                    compat = "✓" if b.is_compatible else "✗"
+                    compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
                     print(f"      {compat} Node.js: {b.version} at {b.path}")
 
             if result.dotnet_binaries:
                 for b in result.dotnet_binaries:
-                    compat = "✓" if b.is_compatible else "✗"
+                    compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
                     print(f"      {compat} .NET: {b.version} at {b.path}")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
