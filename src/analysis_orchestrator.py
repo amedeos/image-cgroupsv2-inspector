@@ -120,10 +120,7 @@ class AnalysisOrchestrator:
                 results_cache[image_name] = result
                 analyzed_count += 1
             except _ImageTimeout:
-                print(
-                    f"WARNING: Skipping image {image_name} "
-                    f"— timed out after {self.image_timeout} seconds"
-                )
+                print(f"WARNING: Skipping image {image_name} — timed out after {self.image_timeout} seconds")
                 if logger:
                     logger.warning(
                         "Skipping image %s — timed out after %d seconds",

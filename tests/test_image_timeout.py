@@ -132,8 +132,8 @@ class TestOrchestratorTimeout:
             image_timeout=5,
         )
         # Bypass the real SIGALRM wrapper so we can trigger the exception directly
-        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: (
-            mock_analyzer.analyze_image(name, debug=debug)
+        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: mock_analyzer.analyze_image(
+            name, debug=debug
         )
 
         images = _sample_images(3)
@@ -158,8 +158,8 @@ class TestOrchestratorTimeout:
             rootfs_path="/tmp/rootfs",
             image_timeout=10,
         )
-        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: (
-            mock_analyzer.analyze_image(name, debug=debug)
+        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: mock_analyzer.analyze_image(
+            name, debug=debug
         )
 
         images = _sample_images(2)
@@ -199,8 +199,8 @@ class TestOrchestratorTimeout:
             rootfs_path="/tmp/rootfs",
             image_timeout=30,
         )
-        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: (
-            mock_analyzer.analyze_image(name, debug=debug)
+        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: mock_analyzer.analyze_image(
+            name, debug=debug
         )
 
         images = _sample_images(2)
@@ -213,6 +213,7 @@ class TestOrchestratorTimeout:
 
     def test_warning_message_printed(self, mock_analyzer, capsys):
         """WARNING line is printed for each timed-out image."""
+
         def side_effect(image_name, debug=False):
             raise _ImageTimeout()
 
@@ -222,8 +223,8 @@ class TestOrchestratorTimeout:
             rootfs_path="/tmp/rootfs",
             image_timeout=42,
         )
-        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: (
-            mock_analyzer.analyze_image(name, debug=debug)
+        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: mock_analyzer.analyze_image(
+            name, debug=debug
         )
 
         images = _sample_images(1)
@@ -251,6 +252,7 @@ class TestOrchestratorTimeout:
 
     def test_cleanup_called_on_timeout(self, mock_analyzer):
         """Cleanup is called for the timed-out image."""
+
         def side_effect(image_name, debug=False):
             raise _ImageTimeout()
 
@@ -260,8 +262,8 @@ class TestOrchestratorTimeout:
             rootfs_path="/tmp/rootfs",
             image_timeout=10,
         )
-        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: (
-            mock_analyzer.analyze_image(name, debug=debug)
+        orchestrator._analyze_with_timeout = lambda analyzer, name, debug=False: mock_analyzer.analyze_image(
+            name, debug=debug
         )
 
         images = _sample_images(1)
