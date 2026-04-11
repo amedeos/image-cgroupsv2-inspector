@@ -428,10 +428,12 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 
 - Named `.state_<target>.json` (e.g., `.state_ocp-prod.json` or `.state_quay.example.com.json`)
 - Written after each image is processed, using atomic writes to prevent corruption
-- Contains a list of completed image names, timestamps, and the CSV output path
-- On resume, the same CSV file from the first run is reused so all results end up in a single file
+- Contains completed image names with their analysis results, timestamps, and the CSV output path
+- On resume, the same CSV file from the first run is reused so all results accumulate in a single file
+- Analysis results from previous runs are restored into the CSV, so no data is lost across interruptions
 - If `--resume` is used without a prior state file, a warning is printed and a full scan starts
-- Images that time out or fail are also marked as completed to avoid retrying them indefinitely
+- Successfully scanned images are skipped on resume; images that failed or timed out are **retried** automatically
+- The state file tracks three categories: `completed_images`, `error_images`, and `timeout_images`
 - `--clean-state` deletes the state file and exits immediately (code `0`). Pass a target name (e.g. `--clean-state ocp-prod`) to skip the cluster/registry connection
 
 ### Command Line Options

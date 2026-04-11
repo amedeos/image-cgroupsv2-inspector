@@ -12,7 +12,7 @@ import traceback
 
 from .image_analyzer import ImageAnalysisResult, ImageAnalyzer
 from .registry_collector import CSV_COLUMNS
-from .scan_state import STATE_VERSION, ScanState
+from .scan_state import ANALYSIS_KEYS, STATE_VERSION, ScanState
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ class AnalysisOrchestrator:
         if self.state_file_path:
             if self.resume:
                 scan_state = ScanState.load(self.state_file_path)
-                if scan_state.completed_count == 0 and scan_state.target == "":
+                if scan_state.scanned_count == 0 and scan_state.target == "":
                     print("WARNING: --resume specified but no state file found; starting full scan")
                     if logger:
                         logger.warning("--resume specified but no state file found; starting full scan")
@@ -146,13 +146,25 @@ class AnalysisOrchestrator:
                             )
                     if scan_state.csv_filepath and csv_filepath:
                         csv_filepath = scan_state.csv_filepath
-                    already = [n for n in unique_image_names if scan_state.is_completed(n)]
+
+                    # Restore cached analysis results into image records
+                    for record in images:
+                        cached = scan_state.get_result(record.get("image_name", ""))
+                        if cached:
+                            for key in ANALYSIS_KEYS:
+                                record[key] = cached.get(key, "")
+
+                    skipped = [n for n in unique_image_names if scan_state.is_completed(n)]
                     remaining = [n for n in unique_image_names if not scan_state.is_completed(n)]
-                    print(f"Resuming: skipping {len(already)} already-scanned images ({len(remaining)} remaining)")
+                    print(f"Resuming: skipping {len(skipped)} already-scanned images ({len(remaining)} remaining)")
+                    if scan_state.error_count:
+                        print(f"  Retrying {scan_state.error_count} previously failed images")
+                    if scan_state.timeout_count:
+                        print(f"  Retrying {scan_state.timeout_count} previously timed-out images")
                     if logger:
                         logger.info(
                             "Resuming: skipping %d already-scanned images (%d remaining)",
-                            len(already),
+                            len(skipped),
                             len(remaining),
                         )
                     unique_image_names = remaining
@@ -196,11 +208,18 @@ class AnalysisOrchestrator:
                     traceback.print_exc()
                 results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(exc))
 
-            if scan_state is not None and self.state_file_path:
-                scan_state.mark_completed(image_name)
-                scan_state.save(self.state_file_path)
-
             self._apply_results(images, results_cache)
+
+            if scan_state is not None and self.state_file_path:
+                result_dict = self._collect_result_dict(images, image_name)
+                cached_result = results_cache.get(image_name)
+                if image_name in skipped_images:
+                    scan_state.mark_timeout(image_name, result_dict)
+                elif cached_result and cached_result.error:
+                    scan_state.mark_error(image_name, result_dict)
+                else:
+                    scan_state.mark_completed(image_name, result_dict)
+                scan_state.save(self.state_file_path)
 
             if csv_filepath:
                 self._save_csv(images, csv_filepath)
@@ -246,6 +265,14 @@ class AnalysisOrchestrator:
             raise
         finally:
             signal.signal(signal.SIGALRM, old_handler)
+
+    @staticmethod
+    def _collect_result_dict(images: list[dict], image_name: str) -> dict[str, str]:
+        """Extract the analysis result fields for *image_name* from the image records."""
+        for record in images:
+            if record.get("image_name") == image_name:
+                return {k: record.get(k, "") for k in ANALYSIS_KEYS}
+        return {}
 
     @staticmethod
     def _apply_results(

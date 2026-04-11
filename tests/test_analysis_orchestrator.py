@@ -477,8 +477,8 @@ class TestAnalysisOrchestratorResume:
         loaded = ScanState.load(state_path)
         assert loaded.target == "ocp-prod"
 
-    def test_timed_out_image_marked_completed(self, mock_analyzer, sample_images, tmp_path):
-        """Timed-out images should be marked as completed in the state file."""
+    def test_error_image_in_error_set(self, mock_analyzer, sample_images, tmp_path):
+        """Failed images go into error_images, not completed_images."""
         state_path = str(tmp_path / ".state_test.json")
 
         def side_effect(image_name, debug=False):
@@ -498,8 +498,31 @@ class TestAnalysisOrchestratorResume:
         orchestrator.analyze_images(sample_images)
 
         loaded = ScanState.load(state_path)
-        assert loaded.is_completed("quay.example.com/testorg/java-app:17")
+        assert not loaded.is_completed("quay.example.com/testorg/java-app:17")
+        assert loaded.error_count == 1
         assert loaded.is_completed("quay.example.com/testorg/node-app:20")
+
+    def test_error_images_retried_on_resume(self, mock_analyzer, sample_images, tmp_path):
+        """Images in error_images should be retried on resume."""
+        state_path = str(tmp_path / ".state_test.json")
+        pre_state = ScanState(target="test")
+        pre_state.mark_completed("quay.example.com/testorg/node-app:20")
+        pre_state.mark_error("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_java_result("quay.example.com/testorg/java-app:17")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 1
+        mock_analyzer.analyze_image.assert_called_once_with("quay.example.com/testorg/java-app:17", debug=False)
 
     def test_defensive_guard_no_state_file_path(self, mock_analyzer, sample_images):
         """state_file_path=None and resume=False must not raise errors."""
@@ -514,6 +537,44 @@ class TestAnalysisOrchestratorResume:
         count, _, _skipped = orchestrator.analyze_images(sample_images)
 
         assert count == 2
+
+    def test_resume_restores_results_into_records(self, mock_analyzer, sample_images, tmp_path):
+        """On resume, cached analysis results are restored into image dicts."""
+        state_path = str(tmp_path / ".state_test.json")
+        csv_path = str(tmp_path / "results.csv")
+
+        cached_result = {
+            "java_binary": "/usr/bin/java",
+            "java_version": "17.0.1",
+            "java_cgroup_v2_compatible": "Yes",
+            "node_binary": "None",
+            "node_version": "None",
+            "node_cgroup_v2_compatible": "N/A",
+            "dotnet_binary": "None",
+            "dotnet_version": "None",
+            "dotnet_cgroup_v2_compatible": "N/A",
+            "analysis_error": "",
+        }
+        pre_state = ScanState(target="test", csv_filepath=csv_path)
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17", cached_result)
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
+
+        java_records = [r for r in sample_images if r["image_name"] == "quay.example.com/testorg/java-app:17"]
+        for rec in java_records:
+            assert rec["java_binary"] == "/usr/bin/java"
+            assert rec["java_version"] == "17.0.1"
+            assert rec["java_cgroup_v2_compatible"] == "Yes"
 
     def test_resume_reuses_csv_filepath(self, mock_analyzer, sample_images, tmp_path):
         """On resume, the CSV from the first run is reused instead of creating a new one."""
