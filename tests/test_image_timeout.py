@@ -251,7 +251,7 @@ class TestOrchestratorTimeout:
         assert skipped == []
 
     def test_cleanup_called_on_timeout(self, mock_analyzer):
-        """Cleanup is called for the timed-out image."""
+        """cleanup_image is called for the timed-out image."""
 
         def side_effect(image_name, debug=False):
             raise _ImageTimeout()
@@ -269,7 +269,7 @@ class TestOrchestratorTimeout:
         images = _sample_images(1)
         orchestrator.analyze_images(images)
 
-        mock_analyzer._cleanup.assert_called_once()
+        mock_analyzer.cleanup_image.assert_called_once_with("quay.example.com/myorg/repo0:latest", debug=False)
 
 
 # ---------------------------------------------------------------------------

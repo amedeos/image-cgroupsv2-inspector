@@ -128,10 +128,7 @@ class AnalysisOrchestrator:
                         self.image_timeout,
                     )
                 skipped_images.append(image_name)
-                analyzer._cleanup(
-                    analyzer._rewrite_internal_registry(image_name),
-                    debug=debug,
-                )
+                analyzer.cleanup_image(image_name, debug=debug)
                 results_cache[image_name] = ImageAnalysisResult(
                     image_name=image_name,
                     image_id="",

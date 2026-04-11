@@ -933,6 +933,19 @@ class ImageAnalyzer:
                 print(f"      [DEBUG] Removing image: {image_name[:50]}...")
             self._run_command(["podman", "rmi", "-f", image_name])
 
+    def cleanup_image(self, image_name: str, debug: bool = False) -> None:
+        """
+        Clean up rootfs and remove the pulled image.
+
+        Resolves internal-registry rewrites automatically so the caller
+        only needs to pass the original image name.
+
+        Args:
+            image_name: Original image name (before any registry rewrite).
+            debug: Enable debug output.
+        """
+        self._cleanup(self._rewrite_internal_registry(image_name), debug=debug)
+
     def analyze_image(self, image_name: str, image_id: str = "", debug: bool = False) -> ImageAnalysisResult:
         """
         Analyze a container image for Java and NodeJS binaries.
