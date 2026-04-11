@@ -393,6 +393,43 @@ QUAY_REGISTRY_ORG=myorg
 
 These can also be set in the `.env` file. CLI arguments override environment variables.
 
+### Resuming Interrupted Scans
+
+On large clusters or registries with thousands of images, scans can take hours. If a scan is interrupted (e.g., network failure, killed process), the `--resume` flag lets you restart where you left off instead of re-scanning all images from the beginning.
+
+A JSON state file is written automatically during every `--analyze` run, tracking which images have been processed. The state file is stored in the output directory (or the directory specified by `--state-dir`).
+
+```bash
+# First run — interrupted after scanning 2000 of 4900 images
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
+
+# Resume — skips the 2000 already-scanned images, scans remaining 2900
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --resume
+
+# Store state files in a custom directory
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --resume --state-dir /var/tmp/scan-state
+
+# Clean up the state file when done (or to force a fresh scan)
+./image-cgroupsv2-inspector --clean-state
+
+# Registry mode works the same way
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --rootfs-path /tmp/images \
+  --analyze --resume
+```
+
+**State file details:**
+
+- Named `.state_<target>.json` (e.g., `.state_ocp-prod.json` or `.state_quay.example.com.json`)
+- Written after each image is processed, using atomic writes to prevent corruption
+- Contains a list of completed image names and timestamps
+- If `--resume` is used without a prior state file, a warning is printed and a full scan starts
+- Images that time out or fail are also marked as completed to avoid retrying them indefinitely
+- `--clean-state` deletes the state file and exits immediately (code `0`)
+
 ### Command Line Options
 
 **OpenShift mode options:**
@@ -430,6 +467,9 @@ These can also be set in the `.env` file. CLI arguments override environment var
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
 | `--image-timeout` | Maximum seconds for pulling and scanning each individual image (default: `600`). If an image exceeds this limit it is skipped with a warning and the tool exits with code `2` |
+| `--resume` | Resume an interrupted scan by skipping images that were already scanned in a previous run. Reads progress from a JSON state file |
+| `--clean-state` | Delete the state file for the current target (cluster or registry) and exit immediately with code `0` |
+| `--state-dir` | Directory where state files are stored (default: same as `--output-dir`) |
 | `--log-to-file` | Enable logging to file |
 | `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
 | `-v, --verbose` | Enable verbose output |

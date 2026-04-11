@@ -12,6 +12,7 @@ import traceback
 
 from .image_analyzer import ImageAnalysisResult, ImageAnalyzer
 from .registry_collector import CSV_COLUMNS
+from .scan_state import STATE_VERSION, ScanState
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ class AnalysisOrchestrator:
             (only for OpenShift mode, None for registry mode).
         image_timeout: Maximum seconds for pulling and scanning each
             individual image.  0 disables the timeout.
+        state_file_path: Path to the JSON state file for resume support.
+            When set, scan progress is saved after each image.
+        resume: If True, load the state file and skip already-scanned images.
     """
 
     def __init__(
@@ -49,12 +53,16 @@ class AnalysisOrchestrator:
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
         image_timeout: int = 600,
+        state_file_path: str | None = None,
+        resume: bool = False,
     ) -> None:
         self.rootfs_path = rootfs_path
         self.pull_secret_path = pull_secret_path
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
         self.image_timeout = image_timeout
+        self.state_file_path = state_file_path
+        self.resume = resume
 
     def _save_csv(self, images: list[dict], filepath: str) -> None:
         """Write image records to CSV using the unified schema."""
@@ -110,6 +118,41 @@ class AnalysisOrchestrator:
                 seen.add(name)
                 unique_image_names.append(name)
 
+        # --- resume / state setup ---
+        scan_state: ScanState | None = None
+        if self.state_file_path:
+            if self.resume:
+                scan_state = ScanState.load(self.state_file_path)
+                if scan_state.completed_count == 0 and scan_state.target == "":
+                    print("WARNING: --resume specified but no state file found; starting full scan")
+                    if logger:
+                        logger.warning("--resume specified but no state file found; starting full scan")
+                    scan_state = ScanState(target="resume")
+                else:
+                    if scan_state.version != STATE_VERSION:
+                        print(
+                            f"WARNING: state file version {scan_state.version} "
+                            f"differs from current version {STATE_VERSION}; proceeding anyway"
+                        )
+                        if logger:
+                            logger.warning(
+                                "State file version %d differs from current version %d",
+                                scan_state.version,
+                                STATE_VERSION,
+                            )
+                    already = [n for n in unique_image_names if scan_state.is_completed(n)]
+                    remaining = [n for n in unique_image_names if not scan_state.is_completed(n)]
+                    print(f"Resuming: skipping {len(already)} already-scanned images ({len(remaining)} remaining)")
+                    if logger:
+                        logger.info(
+                            "Resuming: skipping %d already-scanned images (%d remaining)",
+                            len(already),
+                            len(remaining),
+                        )
+                    unique_image_names = remaining
+            else:
+                scan_state = ScanState(target="scan")
+
         total = len(unique_image_names)
         analyzed_count = 0
         skipped_images: list[str] = []
@@ -146,6 +189,10 @@ class AnalysisOrchestrator:
                 if debug:
                     traceback.print_exc()
                 results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(exc))
+
+            if scan_state is not None:
+                scan_state.mark_completed(image_name)
+                scan_state.save(self.state_file_path)
 
             self._apply_results(images, results_cache)
 

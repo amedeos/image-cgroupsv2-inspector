@@ -8,6 +8,7 @@ import pytest
 from src.analysis_orchestrator import AnalysisOrchestrator
 from src.image_analyzer import BinaryInfo, ImageAnalysisResult
 from src.registry_collector import CSV_COLUMNS
+from src.scan_state import ScanState
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -377,3 +378,119 @@ class TestAnalysisOrchestratorOpenShift:
 
             args = mock_cls.call_args[0]
             assert args[3] == "sha256~mytoken"
+
+
+# ---------------------------------------------------------------------------
+# TestAnalysisOrchestratorResume
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisOrchestratorResume:
+    """Test resume / state-file integration."""
+
+    def test_resume_skips_completed_images(self, mock_analyzer, sample_images, tmp_path):
+        """With resume=True and a pre-populated state, already-scanned images are skipped."""
+        state_path = str(tmp_path / ".state_test.json")
+        pre_state = ScanState(target="test")
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 1
+        assert mock_analyzer.analyze_image.call_count == 1
+        mock_analyzer.analyze_image.assert_called_once_with("quay.example.com/testorg/node-app:20", debug=False)
+
+    def test_state_file_written_without_resume(self, mock_analyzer, sample_images, tmp_path):
+        """Without --resume, the state file is still written progressively."""
+        state_path = str(tmp_path / ".state_test.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+        )
+        orchestrator.analyze_images(sample_images)
+
+        assert (tmp_path / ".state_test.json").exists()
+        loaded = ScanState.load(state_path)
+        assert loaded.completed_count == 2
+
+    def test_state_file_not_written_when_path_is_none(self, mock_analyzer, sample_images, tmp_path):
+        """When state_file_path is None, no state file should be created."""
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=None,
+            resume=False,
+        )
+        orchestrator.analyze_images(sample_images)
+
+        assert len(list(tmp_path.glob("*.json"))) == 0
+
+    def test_resume_with_missing_state_file(self, mock_analyzer, sample_images, tmp_path):
+        """--resume with no prior state file: warn and do full scan."""
+        state_path = str(tmp_path / ".state_missing.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 2
+        assert mock_analyzer.analyze_image.call_count == 2
+
+    def test_timed_out_image_marked_completed(self, mock_analyzer, sample_images, tmp_path):
+        """Timed-out images should be marked as completed in the state file."""
+        state_path = str(tmp_path / ".state_test.json")
+
+        def side_effect(image_name, debug=False):
+            if "java-app" in image_name:
+                raise RuntimeError("pull failed")
+            return _make_node_result(image_name)
+
+        mock_analyzer.analyze_image.side_effect = side_effect
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+        )
+        orchestrator.analyze_images(sample_images)
+
+        loaded = ScanState.load(state_path)
+        assert loaded.is_completed("quay.example.com/testorg/java-app:17")
+        assert loaded.is_completed("quay.example.com/testorg/node-app:20")
+
+    def test_clean_state_deletes_file(self, tmp_path):
+        """Simulate --clean-state: the state file is removed."""
+        state_path = tmp_path / ".state_test.json"
+        ScanState(target="t").save(state_path)
+        assert state_path.exists()
+
+        import os
+
+        os.remove(str(state_path))
+        assert not state_path.exists()
+
+    def test_clean_state_no_file(self, tmp_path):
+        """--clean-state with no existing file: no error."""
+        state_path = tmp_path / ".state_missing.json"
+        assert not state_path.exists()
