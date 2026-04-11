@@ -114,7 +114,7 @@ class TestAnalysisOrchestratorAnalyze:
         """3 records with 2 unique image_names -> analyze called 2 times."""
         mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
 
-        count, _ = orchestrator.analyze_images(sample_images)
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
 
         assert mock_analyzer.analyze_image.call_count == 2
         assert count == 2
@@ -181,7 +181,7 @@ class TestAnalysisOrchestratorAnalyze:
 
         mock_analyzer.analyze_image.side_effect = side_effect
 
-        count, _ = orchestrator.analyze_images(sample_images)
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
 
         assert count == 1
 
@@ -203,22 +203,24 @@ class TestAnalysisOrchestratorAnalyze:
         assert "java_binary" in sample_images[0]
 
     def test_returns_count_and_filepath(self, orchestrator, mock_analyzer, sample_images, tmp_path):
-        """Returns (analyzed_count, csv_filepath)."""
+        """Returns (analyzed_count, csv_filepath, skipped)."""
         mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
         csv_path = str(tmp_path / "results.csv")
 
-        count, returned_path = orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
+        count, returned_path, skipped = orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
 
         assert count == 2
         assert returned_path == csv_path
+        assert skipped == []
 
     def test_returns_none_filepath_when_not_given(self, orchestrator, mock_analyzer, sample_images):
         mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
 
-        count, returned_path = orchestrator.analyze_images(sample_images)
+        count, returned_path, skipped = orchestrator.analyze_images(sample_images)
 
         assert count == 2
         assert returned_path is None
+        assert skipped == []
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +290,7 @@ class TestAnalysisOrchestratorCSV:
     def test_csv_not_written_when_filepath_is_none(self, orchestrator, mock_analyzer, sample_images, tmp_path):
         mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
 
-        _count, filepath = orchestrator.analyze_images(sample_images)
+        _count, filepath, _skipped = orchestrator.analyze_images(sample_images)
 
         assert filepath is None
 
@@ -335,7 +337,7 @@ class TestAnalysisOrchestratorOpenShift:
         ]
         mock_analyzer.analyze_image.return_value = _make_java_result("quay.io/my-org/my-image:latest")
 
-        count, _ = orchestrator.analyze_images(images)
+        count, _, _skipped = orchestrator.analyze_images(images)
 
         assert count == 1
         assert images[0]["java_binary"] == "/usr/bin/java"

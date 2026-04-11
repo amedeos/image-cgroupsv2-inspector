@@ -245,6 +245,16 @@ The tool will save credentials to .env file after successful connection.
         help="Only scan the N most recent tags per repository",
     )
 
+    # --- Timeout ---
+
+    parser.add_argument(
+        "--image-timeout",
+        dest="image_timeout",
+        type=int,
+        default=600,
+        help="Maximum seconds allowed for pulling and scanning each individual image (default: 600)",
+    )
+
     # --- General arguments ---
 
     parser.add_argument(
@@ -544,8 +554,9 @@ def main() -> int:
                 orchestrator = AnalysisOrchestrator(
                     rootfs_path=rootfs_path,
                     pull_secret_path=pull_secret_path,
+                    image_timeout=args.image_timeout,
                 )
-                _, csv_path = orchestrator.analyze_images(
+                _, csv_path, skipped = orchestrator.analyze_images(
                     images=images,
                     csv_filepath=csv_filepath,
                     debug=args.verbose,
@@ -555,6 +566,7 @@ def main() -> int:
                     logger.info("Image analysis completed")
             else:
                 csv_path = registry_collector.save_to_csv(images, output_dir=args.output_dir)
+                skipped = []
                 if log_to_file:
                     logger.info(f"Results saved to CSV: {csv_path}")
 
@@ -589,7 +601,7 @@ def main() -> int:
             logger.info("=" * 60)
 
         print("\n✓ Done!")
-        return 0
+        return 2 if skipped else 0
 
     # ── OpenShift mode ───────────────────────────────────────────
     try:
@@ -629,6 +641,8 @@ def main() -> int:
         if log_to_file:
             logger.error(f"Connection error: {e}")
         return 1
+
+    skipped: list[str] = []
 
     try:
         # Handle namespace filtering
@@ -705,8 +719,9 @@ def main() -> int:
                 pull_secret_path=pull_secret_path,
                 internal_registry_route=internal_registry_route,
                 openshift_token=client.token,
+                image_timeout=args.image_timeout,
             )
-            _, csv_path = orchestrator.analyze_images(
+            _, csv_path, skipped = orchestrator.analyze_images(
                 images=image_dicts,
                 csv_filepath=csv_filepath,
                 debug=args.verbose,
@@ -716,6 +731,7 @@ def main() -> int:
                 logger.info("Image analysis completed")
         else:
             csv_path = collector.save_to_csv(cluster_name=client.cluster_name, output_dir=args.output_dir)
+            skipped = []
             if log_to_file:
                 logger.info(f"Results saved to CSV: {csv_path}")
 
@@ -768,7 +784,7 @@ def main() -> int:
         logger.info("=" * 60)
 
     print("\n✓ Done!")
-    return 0
+    return 2 if skipped else 0
 
 
 if __name__ == "__main__":

@@ -7,12 +7,17 @@ Works with image records from both OpenShift and registry collectors.
 
 import csv
 import logging
+import signal
 import traceback
 
 from .image_analyzer import ImageAnalysisResult, ImageAnalyzer
 from .registry_collector import CSV_COLUMNS
 
 logger = logging.getLogger(__name__)
+
+
+class _ImageTimeout(Exception):
+    """Raised when per-image analysis exceeds the configured timeout."""
 
 
 class AnalysisOrchestrator:
@@ -28,6 +33,8 @@ class AnalysisOrchestrator:
             registry (only for OpenShift mode, None for registry mode).
         openshift_token: Bearer token for internal registry auth
             (only for OpenShift mode, None for registry mode).
+        image_timeout: Maximum seconds for pulling and scanning each
+            individual image.  0 disables the timeout.
     """
 
     def __init__(
@@ -36,11 +43,13 @@ class AnalysisOrchestrator:
         pull_secret_path: str | None = None,
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
+        image_timeout: int = 600,
     ) -> None:
         self.rootfs_path = rootfs_path
         self.pull_secret_path = pull_secret_path
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
+        self.image_timeout = image_timeout
 
     def _save_csv(self, images: list[dict], filepath: str) -> None:
         """Write image records to CSV using the unified schema."""
@@ -57,7 +66,7 @@ class AnalysisOrchestrator:
         csv_filepath: str | None = None,
         debug: bool = False,
         logger: logging.Logger | None = None,
-    ) -> tuple[int, str | None]:
+    ) -> tuple[int, str | None, list[str]]:
         """Analyze images and save CSV incrementally.
 
         For each unique image_name:
@@ -78,7 +87,8 @@ class AnalysisOrchestrator:
             logger: Optional logger for file logging.
 
         Returns:
-            Tuple of (images_analyzed_count, csv_filepath or None).
+            Tuple of (images_analyzed_count, csv_filepath or None,
+            skipped_images list).
         """
         analyzer = ImageAnalyzer(
             self.rootfs_path,
@@ -97,6 +107,7 @@ class AnalysisOrchestrator:
 
         total = len(unique_image_names)
         analyzed_count = 0
+        skipped_images: list[str] = []
         results_cache: dict[str, ImageAnalysisResult] = {}
 
         for idx, image_name in enumerate(unique_image_names, 1):
@@ -105,9 +116,30 @@ class AnalysisOrchestrator:
                 logger.info("[%d/%d] Analyzing image: %s", idx, total, image_name)
 
             try:
-                result = analyzer.analyze_image(image_name, debug=debug)
+                result = self._analyze_with_timeout(analyzer, image_name, debug=debug)
                 results_cache[image_name] = result
                 analyzed_count += 1
+            except _ImageTimeout:
+                print(
+                    f"WARNING: Skipping image {image_name} "
+                    f"— timed out after {self.image_timeout} seconds"
+                )
+                if logger:
+                    logger.warning(
+                        "Skipping image %s — timed out after %d seconds",
+                        image_name,
+                        self.image_timeout,
+                    )
+                skipped_images.append(image_name)
+                analyzer._cleanup(
+                    analyzer._rewrite_internal_registry(image_name),
+                    debug=debug,
+                )
+                results_cache[image_name] = ImageAnalysisResult(
+                    image_name=image_name,
+                    image_id="",
+                    error=f"timed out after {self.image_timeout} seconds",
+                )
             except Exception as exc:
                 print(f"  Error analyzing image: {exc}")
                 if logger:
@@ -128,7 +160,40 @@ class AnalysisOrchestrator:
         if csv_filepath:
             self._save_csv(images, csv_filepath)
 
-        return analyzed_count, csv_filepath
+        if skipped_images:
+            print("\n=== Skipped images (timeout) ===")
+            for name in skipped_images:
+                print(name)
+            print(f"Total skipped: {len(skipped_images)}")
+
+        return analyzed_count, csv_filepath, skipped_images
+
+    def _analyze_with_timeout(
+        self,
+        analyzer: ImageAnalyzer,
+        image_name: str,
+        debug: bool = False,
+    ) -> ImageAnalysisResult:
+        """Run ``analyzer.analyze_image`` with an optional SIGALRM timeout."""
+        if not self.image_timeout:
+            return analyzer.analyze_image(image_name, debug=debug)
+
+        old_handler = signal.getsignal(signal.SIGALRM)
+
+        def _alarm_handler(signum, frame):
+            raise _ImageTimeout()
+
+        try:
+            signal.signal(signal.SIGALRM, _alarm_handler)
+            signal.alarm(self.image_timeout)
+            result = analyzer.analyze_image(image_name, debug=debug)
+            signal.alarm(0)
+            return result
+        except _ImageTimeout:
+            signal.alarm(0)
+            raise
+        finally:
+            signal.signal(signal.SIGALRM, old_handler)
 
     @staticmethod
     def _apply_results(
