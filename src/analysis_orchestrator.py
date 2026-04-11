@@ -16,8 +16,13 @@ from .registry_collector import CSV_COLUMNS
 logger = logging.getLogger(__name__)
 
 
-class _ImageTimeout(Exception):
-    """Raised when per-image analysis exceeds the configured timeout."""
+class _ImageTimeout(BaseException):
+    """Raised when per-image analysis exceeds the configured timeout.
+
+    Inherits from BaseException (not Exception) so that the signal-raised
+    timeout is not swallowed by the broad ``except Exception`` handlers
+    inside ImageAnalyzer._run_command, _extract_tar, and analyze_image.
+    """
 
 
 class AnalysisOrchestrator:
