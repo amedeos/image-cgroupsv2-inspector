@@ -259,9 +259,11 @@ The tool will save credentials to .env file after successful connection.
     parser.add_argument(
         "--clean-state",
         dest="clean_state",
-        action="store_true",
-        default=False,
-        help="Delete the state file for the current target and exit",
+        nargs="?",
+        const=True,
+        default=None,
+        help="Delete the state file and exit. Optionally pass a target name to skip cluster/registry "
+        "connection (e.g. --clean-state ocp-prod)",
     )
 
     parser.add_argument(
@@ -493,6 +495,10 @@ def main() -> int:
     if not args.registry_org:
         args.registry_org = os.environ.get("QUAY_REGISTRY_ORG", "")
 
+    # Handle --clean-state with explicit target (no connection needed)
+    if isinstance(args.clean_state, str):
+        return _handle_clean_state(args.clean_state, state_dir)
+
     is_registry_mode = bool(args.registry_url)
 
     # Mutual exclusion check
@@ -518,7 +524,7 @@ def main() -> int:
         if parsed.port:
             registry_host = f"{parsed.hostname}:{parsed.port}"
 
-        if args.clean_state:
+        if args.clean_state is True:
             return _handle_clean_state(registry_host, state_dir)
 
         state_file_path = _build_state_file_path(registry_host, state_dir)
@@ -610,6 +616,7 @@ def main() -> int:
                     image_timeout=args.image_timeout,
                     state_file_path=state_file_path,
                     resume=args.resume,
+                    target=registry_host,
                 )
                 _, csv_path, skipped = orchestrator.analyze_images(
                     images=images,
@@ -686,7 +693,7 @@ def main() -> int:
         if log_to_file:
             logger.info(f"Connected successfully to cluster: {client.cluster_name}")
 
-        if args.clean_state:
+        if args.clean_state is True:
             client.disconnect()
             return _handle_clean_state(client.cluster_name, state_dir)
 
@@ -783,6 +790,7 @@ def main() -> int:
                 image_timeout=args.image_timeout,
                 state_file_path=state_file_path,
                 resume=args.resume,
+                target=client.cluster_name,
             )
             _, csv_path, skipped = orchestrator.analyze_images(
                 images=image_dicts,

@@ -412,6 +412,9 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 # Clean up the state file when done (or to force a fresh scan)
 ./image-cgroupsv2-inspector --clean-state
 
+# Clean up by target name (no cluster/registry connection needed)
+./image-cgroupsv2-inspector --clean-state ocp-prod
+
 # Registry mode works the same way
 ./image-cgroupsv2-inspector \
   --registry-url https://quay.example.com \
@@ -428,7 +431,7 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 - Contains a list of completed image names and timestamps
 - If `--resume` is used without a prior state file, a warning is printed and a full scan starts
 - Images that time out or fail are also marked as completed to avoid retrying them indefinitely
-- `--clean-state` deletes the state file and exits immediately (code `0`)
+- `--clean-state` deletes the state file and exits immediately (code `0`). Pass a target name (e.g. `--clean-state ocp-prod`) to skip the cluster/registry connection
 
 ### Command Line Options
 
@@ -468,7 +471,7 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 | `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
 | `--image-timeout` | Maximum seconds for pulling and scanning each individual image (default: `600`). If an image exceeds this limit it is skipped with a warning and the tool exits with code `2` |
 | `--resume` | Resume an interrupted scan by skipping images that were already scanned in a previous run. Reads progress from a JSON state file |
-| `--clean-state` | Delete the state file for the current target (cluster or registry) and exit immediately with code `0` |
+| `--clean-state [TARGET]` | Delete the state file and exit with code `0`. When a target name is given (e.g. `--clean-state ocp-prod`), no cluster/registry connection is needed |
 | `--state-dir` | Directory where state files are stored (default: same as `--output-dir`) |
 | `--log-to-file` | Enable logging to file |
 | `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |

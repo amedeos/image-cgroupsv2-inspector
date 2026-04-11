@@ -44,6 +44,8 @@ class AnalysisOrchestrator:
         state_file_path: Path to the JSON state file for resume support.
             When set, scan progress is saved after each image.
         resume: If True, load the state file and skip already-scanned images.
+        target: Identifier for the scan target (cluster name or registry host).
+            Written into the state file for debugging/traceability.
     """
 
     def __init__(
@@ -55,6 +57,7 @@ class AnalysisOrchestrator:
         image_timeout: int = 600,
         state_file_path: str | None = None,
         resume: bool = False,
+        target: str = "",
     ) -> None:
         self.rootfs_path = rootfs_path
         self.pull_secret_path = pull_secret_path
@@ -63,6 +66,7 @@ class AnalysisOrchestrator:
         self.image_timeout = image_timeout
         self.state_file_path = state_file_path
         self.resume = resume
+        self.target = target
 
     def _save_csv(self, images: list[dict], filepath: str) -> None:
         """Write image records to CSV using the unified schema."""
@@ -127,7 +131,7 @@ class AnalysisOrchestrator:
                     print("WARNING: --resume specified but no state file found; starting full scan")
                     if logger:
                         logger.warning("--resume specified but no state file found; starting full scan")
-                    scan_state = ScanState(target="resume")
+                    scan_state = ScanState(target=self.target)
                 else:
                     if scan_state.version != STATE_VERSION:
                         print(
@@ -151,7 +155,7 @@ class AnalysisOrchestrator:
                         )
                     unique_image_names = remaining
             else:
-                scan_state = ScanState(target="scan")
+                scan_state = ScanState(target=self.target)
 
         total = len(unique_image_names)
         analyzed_count = 0
@@ -190,7 +194,7 @@ class AnalysisOrchestrator:
                     traceback.print_exc()
                 results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(exc))
 
-            if scan_state is not None:
+            if scan_state is not None and self.state_file_path:
                 scan_state.mark_completed(image_name)
                 scan_state.save(self.state_file_path)
 

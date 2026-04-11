@@ -402,6 +402,7 @@ class TestAnalysisOrchestratorResume:
             pull_secret_path=".pull-secret",
             state_file_path=state_path,
             resume=True,
+            target="test",
         )
         count, _, _skipped = orchestrator.analyze_images(sample_images)
 
@@ -419,12 +420,14 @@ class TestAnalysisOrchestratorResume:
             pull_secret_path=".pull-secret",
             state_file_path=state_path,
             resume=False,
+            target="my-cluster",
         )
         orchestrator.analyze_images(sample_images)
 
         assert (tmp_path / ".state_test.json").exists()
         loaded = ScanState.load(state_path)
         assert loaded.completed_count == 2
+        assert loaded.target == "my-cluster"
 
     def test_state_file_not_written_when_path_is_none(self, mock_analyzer, sample_images, tmp_path):
         """When state_file_path is None, no state file should be created."""
@@ -450,11 +453,29 @@ class TestAnalysisOrchestratorResume:
             pull_secret_path=".pull-secret",
             state_file_path=state_path,
             resume=True,
+            target="my-cluster",
         )
         count, _, _skipped = orchestrator.analyze_images(sample_images)
 
         assert count == 2
         assert mock_analyzer.analyze_image.call_count == 2
+
+    def test_resume_missing_state_uses_real_target(self, mock_analyzer, sample_images, tmp_path):
+        """When --resume finds no state file, new state uses real target name."""
+        state_path = str(tmp_path / ".state_missing.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="ocp-prod",
+        )
+        orchestrator.analyze_images(sample_images)
+
+        loaded = ScanState.load(state_path)
+        assert loaded.target == "ocp-prod"
 
     def test_timed_out_image_marked_completed(self, mock_analyzer, sample_images, tmp_path):
         """Timed-out images should be marked as completed in the state file."""
@@ -472,12 +493,27 @@ class TestAnalysisOrchestratorResume:
             pull_secret_path=".pull-secret",
             state_file_path=state_path,
             resume=False,
+            target="test",
         )
         orchestrator.analyze_images(sample_images)
 
         loaded = ScanState.load(state_path)
         assert loaded.is_completed("quay.example.com/testorg/java-app:17")
         assert loaded.is_completed("quay.example.com/testorg/node-app:20")
+
+    def test_defensive_guard_no_state_file_path(self, mock_analyzer, sample_images):
+        """state_file_path=None and resume=False must not raise errors."""
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=None,
+            resume=False,
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 2
 
     def test_clean_state_deletes_file(self, tmp_path):
         """Simulate --clean-state: the state file is removed."""
