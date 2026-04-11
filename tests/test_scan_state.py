@@ -114,6 +114,36 @@ class TestScanStateSaveLoad:
         assert "started_at" in data
         assert "updated_at" in data
 
+    def test_csv_filepath_roundtrip(self, tmp_path):
+        path = tmp_path / "state.json"
+        state = ScanState(target="t", csv_filepath="/tmp/out/scan.csv")
+        state.save(path)
+
+        loaded = ScanState.load(path)
+        assert loaded.csv_filepath == "/tmp/out/scan.csv"
+
+    def test_csv_filepath_none_by_default(self):
+        state = ScanState(target="t")
+        assert state.csv_filepath is None
+
+    def test_csv_filepath_none_from_old_state_file(self, tmp_path):
+        """State files created before csv_filepath was added should load fine."""
+        path = tmp_path / "state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "target": "t",
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "completed_images": ["img1"],
+                }
+            )
+        )
+        loaded = ScanState.load(path)
+        assert loaded.csv_filepath is None
+        assert loaded.is_completed("img1")
+
 
 class TestScanStateAtomicWrite:
     """Atomic write safety."""

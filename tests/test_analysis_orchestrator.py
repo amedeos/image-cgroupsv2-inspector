@@ -515,6 +515,47 @@ class TestAnalysisOrchestratorResume:
 
         assert count == 2
 
+    def test_resume_reuses_csv_filepath(self, mock_analyzer, sample_images, tmp_path):
+        """On resume, the CSV from the first run is reused instead of creating a new one."""
+        state_path = str(tmp_path / ".state_test.json")
+        original_csv = str(tmp_path / "first-run.csv")
+
+        pre_state = ScanState(target="test", csv_filepath=original_csv)
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        new_csv = str(tmp_path / "second-run.csv")
+        _, returned_csv, _skipped = orchestrator.analyze_images(sample_images, csv_filepath=new_csv)
+
+        assert returned_csv == original_csv
+
+    def test_csv_filepath_saved_in_state(self, mock_analyzer, sample_images, tmp_path):
+        """The CSV path is persisted in the state file."""
+        state_path = str(tmp_path / ".state_test.json")
+        csv_path = str(tmp_path / "results.csv")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+            target="my-cluster",
+        )
+        orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
+
+        loaded = ScanState.load(state_path)
+        assert loaded.csv_filepath == csv_path
+
     def test_clean_state_deletes_file(self, tmp_path):
         """Simulate --clean-state: the state file is removed."""
         state_path = tmp_path / ".state_test.json"

@@ -131,7 +131,7 @@ class AnalysisOrchestrator:
                     print("WARNING: --resume specified but no state file found; starting full scan")
                     if logger:
                         logger.warning("--resume specified but no state file found; starting full scan")
-                    scan_state = ScanState(target=self.target)
+                    scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
                 else:
                     if scan_state.version != STATE_VERSION:
                         print(
@@ -144,6 +144,8 @@ class AnalysisOrchestrator:
                                 scan_state.version,
                                 STATE_VERSION,
                             )
+                    if scan_state.csv_filepath and csv_filepath:
+                        csv_filepath = scan_state.csv_filepath
                     already = [n for n in unique_image_names if scan_state.is_completed(n)]
                     remaining = [n for n in unique_image_names if not scan_state.is_completed(n)]
                     print(f"Resuming: skipping {len(already)} already-scanned images ({len(remaining)} remaining)")
@@ -155,7 +157,7 @@ class AnalysisOrchestrator:
                         )
                     unique_image_names = remaining
             else:
-                scan_state = ScanState(target=self.target)
+                scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
 
         total = len(unique_image_names)
         analyzed_count = 0

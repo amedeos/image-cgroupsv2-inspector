@@ -27,6 +27,7 @@ class ScanState:
         started_at: ISO-8601 timestamp when the scan started.
         updated_at: ISO-8601 timestamp of the last state update.
         version: State file schema version.
+        csv_filepath: Path to the CSV output file used for this scan.
     """
 
     def __init__(
@@ -36,6 +37,7 @@ class ScanState:
         started_at: str | None = None,
         updated_at: str | None = None,
         version: int = STATE_VERSION,
+        csv_filepath: str | None = None,
     ) -> None:
         self.version = version
         self.target = target
@@ -43,6 +45,7 @@ class ScanState:
         self.started_at = started_at or now
         self.updated_at = updated_at or now
         self._completed: set[str] = set(completed_images) if completed_images else set()
+        self.csv_filepath = csv_filepath
 
     @property
     def completed_count(self) -> int:
@@ -65,6 +68,7 @@ class ScanState:
             "target": self.target,
             "started_at": self.started_at,
             "updated_at": self.updated_at,
+            "csv_filepath": self.csv_filepath,
             "completed_images": sorted(self._completed),
         }
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -95,6 +99,7 @@ class ScanState:
             started_at=data.get("started_at"),
             updated_at=data.get("updated_at"),
             version=data.get("version", STATE_VERSION),
+            csv_filepath=data.get("csv_filepath"),
         )
 
     @staticmethod
