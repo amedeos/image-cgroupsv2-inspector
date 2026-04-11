@@ -404,7 +404,7 @@ class TestRegistryModePullSecret:
         mock_rootfs.return_value.create_rootfs_directory.return_value = (True, "OK")
 
         mock_orch = MagicMock()
-        mock_orch.analyze_images.return_value = (2, "/tmp/out/test.csv")
+        mock_orch.analyze_images.return_value = (2, "/tmp/out/test.csv", [])
 
         mock_gen_auth = MagicMock(return_value="/tmp/generated-auth.json")
 
@@ -573,7 +573,7 @@ class TestRegistryModeWithAnalysis:
         mock_rootfs.return_value.create_rootfs_directory.return_value = (True, "OK")
 
         mock_orch = MagicMock()
-        mock_orch.analyze_images.return_value = (1, "/tmp/out/test.csv")
+        mock_orch.analyze_images.return_value = (1, "/tmp/out/test.csv", [])
 
         with (
             patch("sys.argv", [*_REGISTRY_BASE_ARGS, "--analyze", "--rootfs-path", "/tmp/rootfs"]),
@@ -771,7 +771,7 @@ class TestOpenShiftModeNotBroken:
         mock_rootfs.return_value.create_rootfs_directory.return_value = (True, "OK")
 
         mock_orch = MagicMock()
-        mock_orch.analyze_images.return_value = (2, "/tmp/out/analyzed.csv")
+        mock_orch.analyze_images.return_value = (2, "/tmp/out/analyzed.csv", [])
 
         return args, mock_client, mock_collector, mock_rootfs, mock_orch
 
