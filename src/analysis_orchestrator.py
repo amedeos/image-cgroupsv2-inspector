@@ -12,6 +12,7 @@ import traceback
 
 from .image_analyzer import ImageAnalysisResult, ImageAnalyzer
 from .registry_collector import CSV_COLUMNS
+from .scan_state import ANALYSIS_KEYS, STATE_VERSION, ScanState
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,11 @@ class AnalysisOrchestrator:
             (only for OpenShift mode, None for registry mode).
         image_timeout: Maximum seconds for pulling and scanning each
             individual image.  0 disables the timeout.
+        state_file_path: Path to the JSON state file for resume support.
+            When set, scan progress is saved after each image.
+        resume: If True, load the state file and skip already-scanned images.
+        target: Identifier for the scan target (cluster name or registry host).
+            Written into the state file for debugging/traceability.
     """
 
     def __init__(
@@ -49,12 +55,18 @@ class AnalysisOrchestrator:
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
         image_timeout: int = 600,
+        state_file_path: str | None = None,
+        resume: bool = False,
+        target: str = "",
     ) -> None:
         self.rootfs_path = rootfs_path
         self.pull_secret_path = pull_secret_path
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
         self.image_timeout = image_timeout
+        self.state_file_path = state_file_path
+        self.resume = resume
+        self.target = target
 
     def _save_csv(self, images: list[dict], filepath: str) -> None:
         """Write image records to CSV using the unified schema."""
@@ -110,6 +122,55 @@ class AnalysisOrchestrator:
                 seen.add(name)
                 unique_image_names.append(name)
 
+        # --- resume / state setup ---
+        scan_state: ScanState | None = None
+        if self.state_file_path:
+            if self.resume:
+                scan_state = ScanState.load(self.state_file_path)
+                if scan_state.scanned_count == 0 and scan_state.target == "":
+                    print("WARNING: --resume specified but no state file found; starting full scan")
+                    if logger:
+                        logger.warning("--resume specified but no state file found; starting full scan")
+                    scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
+                else:
+                    if scan_state.version != STATE_VERSION:
+                        print(
+                            f"WARNING: state file version {scan_state.version} "
+                            f"differs from current version {STATE_VERSION}; proceeding anyway"
+                        )
+                        if logger:
+                            logger.warning(
+                                "State file version %d differs from current version %d",
+                                scan_state.version,
+                                STATE_VERSION,
+                            )
+                    if scan_state.csv_filepath and csv_filepath:
+                        csv_filepath = scan_state.csv_filepath
+
+                    # Restore cached analysis results into image records
+                    for record in images:
+                        cached = scan_state.get_result(record.get("image_name", ""))
+                        if cached:
+                            for key in ANALYSIS_KEYS:
+                                record[key] = cached.get(key, "")
+
+                    skipped = [n for n in unique_image_names if scan_state.is_completed(n)]
+                    remaining = [n for n in unique_image_names if not scan_state.is_completed(n)]
+                    print(f"Resuming: skipping {len(skipped)} already-scanned images ({len(remaining)} remaining)")
+                    if scan_state.error_count:
+                        print(f"  Retrying {scan_state.error_count} previously failed images")
+                    if scan_state.timeout_count:
+                        print(f"  Retrying {scan_state.timeout_count} previously timed-out images")
+                    if logger:
+                        logger.info(
+                            "Resuming: skipping %d already-scanned images (%d remaining)",
+                            len(skipped),
+                            len(remaining),
+                        )
+                    unique_image_names = remaining
+            else:
+                scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
+
         total = len(unique_image_names)
         analyzed_count = 0
         skipped_images: list[str] = []
@@ -148,6 +209,17 @@ class AnalysisOrchestrator:
                 results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(exc))
 
             self._apply_results(images, results_cache)
+
+            if scan_state is not None and self.state_file_path:
+                result_dict = self._collect_result_dict(images, image_name)
+                cached_result = results_cache.get(image_name)
+                if image_name in skipped_images:
+                    scan_state.mark_timeout(image_name, result_dict)
+                elif cached_result and cached_result.error:
+                    scan_state.mark_error(image_name, result_dict)
+                else:
+                    scan_state.mark_completed(image_name, result_dict)
+                scan_state.save(self.state_file_path)
 
             if csv_filepath:
                 self._save_csv(images, csv_filepath)
@@ -193,6 +265,14 @@ class AnalysisOrchestrator:
             raise
         finally:
             signal.signal(signal.SIGALRM, old_handler)
+
+    @staticmethod
+    def _collect_result_dict(images: list[dict], image_name: str) -> dict[str, str]:
+        """Extract the analysis result fields for *image_name* from the image records."""
+        for record in images:
+            if record.get("image_name") == image_name:
+                return {k: record.get(k, "") for k in ANALYSIS_KEYS}
+        return {}
 
     @staticmethod
     def _apply_results(

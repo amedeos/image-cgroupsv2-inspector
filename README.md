@@ -393,6 +393,49 @@ QUAY_REGISTRY_ORG=myorg
 
 These can also be set in the `.env` file. CLI arguments override environment variables.
 
+### Resuming Interrupted Scans
+
+On large clusters or registries with thousands of images, scans can take hours. If a scan is interrupted (e.g., network failure, killed process), the `--resume` flag lets you restart where you left off instead of re-scanning all images from the beginning.
+
+A JSON state file is written automatically during every `--analyze` run, tracking which images have been processed. The state file is stored in the output directory (or the directory specified by `--state-dir`).
+
+```bash
+# First run — interrupted after scanning 2000 of 4900 images
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
+
+# Resume — skips the 2000 already-scanned images, scans remaining 2900
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --resume
+
+# Store state files in a custom directory
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --resume --state-dir /var/tmp/scan-state
+
+# Clean up the state file when done (or to force a fresh scan)
+./image-cgroupsv2-inspector --clean-state
+
+# Clean up by target name (no cluster/registry connection needed)
+./image-cgroupsv2-inspector --clean-state ocp-prod
+
+# Registry mode works the same way
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org myorg \
+  --rootfs-path /tmp/images \
+  --analyze --resume
+```
+
+**State file details:**
+
+- Named `.state_<target>.json` (e.g., `.state_ocp-prod.json` or `.state_quay.example.com.json`)
+- Written after each image is processed, using atomic writes to prevent corruption
+- Contains completed image names with their analysis results, timestamps, and the CSV output path
+- On resume, the same CSV file from the first run is reused so all results accumulate in a single file
+- Analysis results from previous runs are restored into the CSV, so no data is lost across interruptions
+- If `--resume` is used without a prior state file, a warning is printed and a full scan starts
+- Successfully scanned images are skipped on resume; images that failed or timed out are **retried** automatically
+- The state file tracks three categories: `completed_images`, `error_images`, and `timeout_images`
+- `--clean-state` deletes the state file and exits immediately (code `0`). Pass a target name (e.g. `--clean-state ocp-prod`) to skip the cluster/registry connection
+
 ### Command Line Options
 
 **OpenShift mode options:**
@@ -430,6 +473,9 @@ These can also be set in the `.env` file. CLI arguments override environment var
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
 | `--image-timeout` | Maximum seconds for pulling and scanning each individual image (default: `600`). If an image exceeds this limit it is skipped with a warning and the tool exits with code `2` |
+| `--resume` | Resume an interrupted scan by skipping images that were already scanned in a previous run. Reads progress from a JSON state file |
+| `--clean-state [TARGET]` | Delete the state file and exit with code `0`. When a target name is given (e.g. `--clean-state ocp-prod`), no cluster/registry connection is needed |
+| `--state-dir` | Directory where state files are stored (default: same as `--output-dir`) |
 | `--log-to-file` | Enable logging to file |
 | `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
 | `-v, --verbose` | Enable verbose output |

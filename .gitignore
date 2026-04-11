@@ -74,5 +74,8 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
+# Scan state files (created by --resume)
+.state_*.json
+
 # rootfs directories (created by the tool)
 rootfs/

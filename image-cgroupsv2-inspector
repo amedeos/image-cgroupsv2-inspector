@@ -35,6 +35,7 @@ from src.openshift_client import OpenShiftClient
 from src.quay_client import QuayClient, QuayClientError
 from src.registry_collector import RegistryCollector
 from src.rootfs_manager import RootFSManager
+from src.scan_state import ScanState
 from src.system_checks import run_system_checks
 
 
@@ -245,6 +246,34 @@ The tool will save credentials to .env file after successful connection.
         help="Only scan the N most recent tags per repository",
     )
 
+    # --- Resume / state ---
+
+    parser.add_argument(
+        "--resume",
+        dest="resume",
+        action="store_true",
+        default=False,
+        help="Resume an interrupted scan by skipping already-scanned images (reads from state file)",
+    )
+
+    parser.add_argument(
+        "--clean-state",
+        dest="clean_state",
+        nargs="?",
+        const=True,
+        default=None,
+        help="Delete the state file and exit. Optionally pass a target name to skip cluster/registry "
+        "connection (e.g. --clean-state ocp-prod)",
+    )
+
+    parser.add_argument(
+        "--state-dir",
+        dest="state_dir",
+        type=str,
+        default=None,
+        help="Directory where state files are stored (default: same as --output-dir)",
+    )
+
     # --- Timeout ---
 
     parser.add_argument(
@@ -390,6 +419,22 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
     print(f"      Images skipped (timeout): {skipped_count}")
 
 
+def _build_state_file_path(target: str, state_dir: str) -> str:
+    """Return the full path to the state file for *target*."""
+    return str(Path(state_dir) / ScanState.build_state_filename(target))
+
+
+def _handle_clean_state(target: str, state_dir: str) -> int:
+    """Delete the state file for *target* and return exit code 0."""
+    path = _build_state_file_path(target, state_dir)
+    if Path(path).exists():
+        os.remove(path)
+        print(f"State file removed: {path}")
+    else:
+        print("No state file found")
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     print_banner()
@@ -399,6 +444,9 @@ def main() -> int:
 
     # Change to script directory for relative paths
     os.chdir(script_dir)
+
+    # Resolve state directory early (default = output dir)
+    state_dir = args.state_dir if args.state_dir else args.output_dir
 
     # Set up logging
     # If --log-file is specified with a non-default value, imply --log-to-file
@@ -447,6 +495,10 @@ def main() -> int:
     if not args.registry_org:
         args.registry_org = os.environ.get("QUAY_REGISTRY_ORG", "")
 
+    # Handle --clean-state with explicit target (no connection needed)
+    if isinstance(args.clean_state, str):
+        return _handle_clean_state(args.clean_state, state_dir)
+
     is_registry_mode = bool(args.registry_url)
 
     # Mutual exclusion check
@@ -471,6 +523,11 @@ def main() -> int:
         registry_host = parsed.hostname
         if parsed.port:
             registry_host = f"{parsed.hostname}:{parsed.port}"
+
+        if args.clean_state is True:
+            return _handle_clean_state(registry_host, state_dir)
+
+        state_file_path = _build_state_file_path(registry_host, state_dir)
 
         print(f"\n🔌 Connecting to Quay registry: {args.registry_url}")
         if log_to_file:
@@ -557,6 +614,9 @@ def main() -> int:
                     rootfs_path=rootfs_path,
                     pull_secret_path=pull_secret_path,
                     image_timeout=args.image_timeout,
+                    state_file_path=state_file_path,
+                    resume=args.resume,
+                    target=registry_host,
                 )
                 _, csv_path, skipped = orchestrator.analyze_images(
                     images=images,
@@ -632,6 +692,12 @@ def main() -> int:
         client.connect()
         if log_to_file:
             logger.info(f"Connected successfully to cluster: {client.cluster_name}")
+
+        if args.clean_state is True:
+            client.disconnect()
+            return _handle_clean_state(client.cluster_name, state_dir)
+
+        state_file_path = _build_state_file_path(client.cluster_name, state_dir)
 
     except ValueError as e:
         print(f"\n✗ Configuration error: {e}")
@@ -722,6 +788,9 @@ def main() -> int:
                 internal_registry_route=internal_registry_route,
                 openshift_token=client.token,
                 image_timeout=args.image_timeout,
+                state_file_path=state_file_path,
+                resume=args.resume,
+                target=client.cluster_name,
             )
             _, csv_path, skipped = orchestrator.analyze_images(
                 images=image_dicts,

@@ -8,6 +8,7 @@ import pytest
 from src.analysis_orchestrator import AnalysisOrchestrator
 from src.image_analyzer import BinaryInfo, ImageAnalysisResult
 from src.registry_collector import CSV_COLUMNS
+from src.scan_state import ScanState
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -377,3 +378,257 @@ class TestAnalysisOrchestratorOpenShift:
 
             args = mock_cls.call_args[0]
             assert args[3] == "sha256~mytoken"
+
+
+# ---------------------------------------------------------------------------
+# TestAnalysisOrchestratorResume
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisOrchestratorResume:
+    """Test resume / state-file integration."""
+
+    def test_resume_skips_completed_images(self, mock_analyzer, sample_images, tmp_path):
+        """With resume=True and a pre-populated state, already-scanned images are skipped."""
+        state_path = str(tmp_path / ".state_test.json")
+        pre_state = ScanState(target="test")
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 1
+        assert mock_analyzer.analyze_image.call_count == 1
+        mock_analyzer.analyze_image.assert_called_once_with("quay.example.com/testorg/node-app:20", debug=False)
+
+    def test_state_file_written_without_resume(self, mock_analyzer, sample_images, tmp_path):
+        """Without --resume, the state file is still written progressively."""
+        state_path = str(tmp_path / ".state_test.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+            target="my-cluster",
+        )
+        orchestrator.analyze_images(sample_images)
+
+        assert (tmp_path / ".state_test.json").exists()
+        loaded = ScanState.load(state_path)
+        assert loaded.completed_count == 2
+        assert loaded.target == "my-cluster"
+
+    def test_state_file_not_written_when_path_is_none(self, mock_analyzer, sample_images, tmp_path):
+        """When state_file_path is None, no state file should be created."""
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=None,
+            resume=False,
+        )
+        orchestrator.analyze_images(sample_images)
+
+        assert len(list(tmp_path.glob("*.json"))) == 0
+
+    def test_resume_with_missing_state_file(self, mock_analyzer, sample_images, tmp_path):
+        """--resume with no prior state file: warn and do full scan."""
+        state_path = str(tmp_path / ".state_missing.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="my-cluster",
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 2
+        assert mock_analyzer.analyze_image.call_count == 2
+
+    def test_resume_missing_state_uses_real_target(self, mock_analyzer, sample_images, tmp_path):
+        """When --resume finds no state file, new state uses real target name."""
+        state_path = str(tmp_path / ".state_missing.json")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="ocp-prod",
+        )
+        orchestrator.analyze_images(sample_images)
+
+        loaded = ScanState.load(state_path)
+        assert loaded.target == "ocp-prod"
+
+    def test_error_image_in_error_set(self, mock_analyzer, sample_images, tmp_path):
+        """Failed images go into error_images, not completed_images."""
+        state_path = str(tmp_path / ".state_test.json")
+
+        def side_effect(image_name, debug=False):
+            if "java-app" in image_name:
+                raise RuntimeError("pull failed")
+            return _make_node_result(image_name)
+
+        mock_analyzer.analyze_image.side_effect = side_effect
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+            target="test",
+        )
+        orchestrator.analyze_images(sample_images)
+
+        loaded = ScanState.load(state_path)
+        assert not loaded.is_completed("quay.example.com/testorg/java-app:17")
+        assert loaded.error_count == 1
+        assert loaded.is_completed("quay.example.com/testorg/node-app:20")
+
+    def test_error_images_retried_on_resume(self, mock_analyzer, sample_images, tmp_path):
+        """Images in error_images should be retried on resume."""
+        state_path = str(tmp_path / ".state_test.json")
+        pre_state = ScanState(target="test")
+        pre_state.mark_completed("quay.example.com/testorg/node-app:20")
+        pre_state.mark_error("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_java_result("quay.example.com/testorg/java-app:17")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 1
+        mock_analyzer.analyze_image.assert_called_once_with("quay.example.com/testorg/java-app:17", debug=False)
+
+    def test_defensive_guard_no_state_file_path(self, mock_analyzer, sample_images):
+        """state_file_path=None and resume=False must not raise errors."""
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=None,
+            resume=False,
+        )
+        count, _, _skipped = orchestrator.analyze_images(sample_images)
+
+        assert count == 2
+
+    def test_resume_restores_results_into_records(self, mock_analyzer, sample_images, tmp_path):
+        """On resume, cached analysis results are restored into image dicts."""
+        state_path = str(tmp_path / ".state_test.json")
+        csv_path = str(tmp_path / "results.csv")
+
+        cached_result = {
+            "java_binary": "/usr/bin/java",
+            "java_version": "17.0.1",
+            "java_cgroup_v2_compatible": "Yes",
+            "node_binary": "None",
+            "node_version": "None",
+            "node_cgroup_v2_compatible": "N/A",
+            "dotnet_binary": "None",
+            "dotnet_version": "None",
+            "dotnet_cgroup_v2_compatible": "N/A",
+            "analysis_error": "",
+        }
+        pre_state = ScanState(target="test", csv_filepath=csv_path)
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17", cached_result)
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
+
+        java_records = [r for r in sample_images if r["image_name"] == "quay.example.com/testorg/java-app:17"]
+        for rec in java_records:
+            assert rec["java_binary"] == "/usr/bin/java"
+            assert rec["java_version"] == "17.0.1"
+            assert rec["java_cgroup_v2_compatible"] == "Yes"
+
+    def test_resume_reuses_csv_filepath(self, mock_analyzer, sample_images, tmp_path):
+        """On resume, the CSV from the first run is reused instead of creating a new one."""
+        state_path = str(tmp_path / ".state_test.json")
+        original_csv = str(tmp_path / "first-run.csv")
+
+        pre_state = ScanState(target="test", csv_filepath=original_csv)
+        pre_state.mark_completed("quay.example.com/testorg/java-app:17")
+        pre_state.save(state_path)
+
+        mock_analyzer.analyze_image.return_value = _make_node_result("quay.example.com/testorg/node-app:20")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=True,
+            target="test",
+        )
+        new_csv = str(tmp_path / "second-run.csv")
+        _, returned_csv, _skipped = orchestrator.analyze_images(sample_images, csv_filepath=new_csv)
+
+        assert returned_csv == original_csv
+
+    def test_csv_filepath_saved_in_state(self, mock_analyzer, sample_images, tmp_path):
+        """The CSV path is persisted in the state file."""
+        state_path = str(tmp_path / ".state_test.json")
+        csv_path = str(tmp_path / "results.csv")
+        mock_analyzer.analyze_image.return_value = ImageAnalysisResult(image_name="test", image_id="")
+
+        orchestrator = AnalysisOrchestrator(
+            rootfs_path="/tmp/rootfs",
+            pull_secret_path=".pull-secret",
+            state_file_path=state_path,
+            resume=False,
+            target="my-cluster",
+        )
+        orchestrator.analyze_images(sample_images, csv_filepath=csv_path)
+
+        loaded = ScanState.load(state_path)
+        assert loaded.csv_filepath == csv_path
+
+    def test_clean_state_deletes_file(self, tmp_path):
+        """Simulate --clean-state: the state file is removed."""
+        state_path = tmp_path / ".state_test.json"
+        ScanState(target="t").save(state_path)
+        assert state_path.exists()
+
+        import os
+
+        os.remove(str(state_path))
+        assert not state_path.exists()
+
+    def test_clean_state_no_file(self, tmp_path):
+        """--clean-state with no existing file: no error."""
+        state_path = tmp_path / ".state_missing.json"
+        assert not state_path.exists()

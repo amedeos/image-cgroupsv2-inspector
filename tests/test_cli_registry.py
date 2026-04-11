@@ -831,3 +831,50 @@ class TestOpenShiftModeNotBroken:
         assert result == 0
         for img in mock_collector.images:
             img.to_dict.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# TestCleanStateWithTarget
+# ---------------------------------------------------------------------------
+
+
+class TestCleanStateWithTarget:
+    """Test --clean-state with an explicit target name (no connection needed)."""
+
+    def test_clean_state_with_target_string_no_connection(self, tmp_path, capsys):
+        """--clean-state ocp-prod deletes the file without connecting."""
+        from src.scan_state import ScanState
+
+        state_dir = str(tmp_path)
+        state_file = tmp_path / ".state_ocp-prod.json"
+        ScanState(target="ocp-prod").save(state_file)
+        assert state_file.exists()
+
+        with (
+            patch("sys.argv", ["image-cgroupsv2-inspector", "--clean-state", "ocp-prod", "--state-dir", state_dir]),
+            patch.object(main_script, "run_system_checks", return_value=True),
+            patch.object(main_script, "print_banner"),
+            patch("dotenv.load_dotenv"),
+            patch.object(main_script, "OpenShiftClient") as mock_oc,
+        ):
+            result = main()
+
+        assert result == 0
+        assert not state_file.exists()
+        mock_oc.assert_not_called()
+        assert "State file removed" in capsys.readouterr().out
+
+    def test_clean_state_with_target_no_file(self, tmp_path, capsys):
+        """--clean-state nonexistent prints 'No state file found'."""
+        state_dir = str(tmp_path)
+
+        with (
+            patch("sys.argv", ["image-cgroupsv2-inspector", "--clean-state", "nonexistent", "--state-dir", state_dir]),
+            patch.object(main_script, "run_system_checks", return_value=True),
+            patch.object(main_script, "print_banner"),
+            patch("dotenv.load_dotenv"),
+        ):
+            result = main()
+
+        assert result == 0
+        assert "No state file found" in capsys.readouterr().out
