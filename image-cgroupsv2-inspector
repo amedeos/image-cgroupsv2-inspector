@@ -352,7 +352,7 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger | None = None, skip_di
     return True
 
 
-def _print_analysis_summary(images: list[dict]) -> None:
+def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None = None) -> None:
     """Print analysis summary from image record dicts."""
     java_found = sum(1 for img in images if img.get("java_binary", "None") != "None")
     node_found = sum(1 for img in images if img.get("node_binary", "None") != "None")
@@ -386,6 +386,8 @@ def _print_analysis_summary(images: list[dict]) -> None:
         print(f"        ✗ cgroup v2 incompatible: {dotnet_incompat}")
         if dotnet_unknown > 0:
             print(f"        ? cgroup v2 unknown: {dotnet_unknown}")
+    skipped_count = len(skipped_images) if skipped_images else 0
+    print(f"      Images skipped (timeout): {skipped_count}")
 
 
 def main() -> int:
@@ -579,7 +581,7 @@ def main() -> int:
             print(f"   Unique images: {unique_count}")
 
             if args.analyze:
-                _print_analysis_summary(images)
+                _print_analysis_summary(images, skipped)
 
             print(f"\n   Output file: {csv_path}")
 
@@ -751,7 +753,7 @@ def main() -> int:
         print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
 
         if args.analyze:
-            _print_analysis_summary(image_dicts)
+            _print_analysis_summary(image_dicts, skipped)
 
         print(f"\n   Output file: {csv_path}")
 
