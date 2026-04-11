@@ -245,6 +245,9 @@ The container runs as root. For image pulls and analysis, podman runs inside the
 # Inspect only a specific namespace
 ./image-cgroupsv2-inspector -n my-namespace
 ./image-cgroupsv2-inspector --namespace my-namespace --analyze --rootfs-path /tmp/images
+
+# Limit each image pull+scan to 120 seconds (default: 600)
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --image-timeout 120
 ```
 
 #### Getting OpenShift Credentials
@@ -426,6 +429,7 @@ These can also be set in the `.env` file. CLI arguments override environment var
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
 | `--skip-collection` | Skip image collection (useful for testing rootfs setup) |
 | `--skip-disk-check` | Skip the 20GB minimum free disk space check. A warning will be logged instead of stopping execution |
+| `--image-timeout` | Maximum seconds for pulling and scanning each individual image (default: `600`). If an image exceeds this limit it is skipped with a warning and the tool exits with code `2` |
 | `--log-to-file` | Enable logging to file |
 | `--log-file` | Path to log file (default: `image-cgroupsv2-inspector.log`). Implies `--log-to-file` |
 | `-v, --verbose` | Enable verbose output |
