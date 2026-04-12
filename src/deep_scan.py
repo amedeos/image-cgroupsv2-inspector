@@ -139,7 +139,15 @@ CGROUPV2_CONTROLLER_PATHS = (
 
 _V2_PATTERN_STRINGS = list(CGROUPV2_FILE_NAMES) + list(CGROUPV2_CONTROLLER_PATHS)
 _V2_PATTERN_STRINGS.sort(key=len, reverse=True)
-CGROUPV2_REGEX = re.compile("|".join(re.escape(p) for p in _V2_PATTERN_STRINGS))
+# Use negative lookbehind/lookahead to prevent matching v2 patterns
+# that are substrings of v1 patterns (e.g. "io.weight" inside "blkio.weight",
+# "memory.max" inside "memory.max_usage_in_bytes").
+CGROUPV2_REGEX = re.compile(
+    "|".join(
+        rf"(?<![a-z]){re.escape(p)}(?![a-z_])"
+        for p in _V2_PATTERN_STRINGS
+    )
+)
 
 
 def find_cgroupv2_patterns(text: str) -> list[str]:

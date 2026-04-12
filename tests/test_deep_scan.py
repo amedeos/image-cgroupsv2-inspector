@@ -170,6 +170,14 @@ class TestCgroupV2Patterns:
     def test_does_not_match_v1(self, text):
         assert CGROUPV2_REGEX.search(text) is None
 
+    @pytest.mark.parametrize("text", [
+        "blkio.weight",              # v1 — contains "io.weight" as substring
+        "memory.max_usage_in_bytes", # v1 — contains "memory.max" as substring
+    ])
+    def test_does_not_match_v1_superstrings(self, text):
+        """V2 regex must not match when the v2 pattern is embedded inside a v1 pattern."""
+        assert CGROUPV2_REGEX.search(text) is None
+
 
 class TestFindCgroupV2Patterns:
     def test_empty_string(self):
@@ -184,6 +192,40 @@ class TestFindCgroupV2Patterns:
     def test_no_v1_patterns_matched(self):
         text = "cat /sys/fs/cgroup/memory/memory.limit_in_bytes"
         assert find_cgroupv2_patterns(text) == []
+
+    def test_no_false_positive_on_blkio_weight(self):
+        """'blkio.weight' is v1 — must not trigger v2 match for 'io.weight'."""
+        text = "cat /sys/fs/cgroup/blkio/blkio.weight"
+        assert find_cgroupv2_patterns(text) == []
+
+    def test_no_false_positive_on_memory_max_usage(self):
+        """'memory.max_usage_in_bytes' is v1 — must not trigger v2 match for 'memory.max'."""
+        text = "cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes"
+        assert find_cgroupv2_patterns(text) == []
+
+    def test_real_v2_memory_max_still_matches(self):
+        """Standalone 'memory.max' (actual v2 file) must still match."""
+        text = "cat /sys/fs/cgroup/memory.max"
+        result = find_cgroupv2_patterns(text)
+        assert "memory.max" in result
+
+    def test_real_v2_io_weight_still_matches(self):
+        """Standalone 'io.weight' (actual v2 file) must still match."""
+        text = "cat /sys/fs/cgroup/io.weight"
+        result = find_cgroupv2_patterns(text)
+        assert "io.weight" in result
+
+    def test_v1_and_v2_in_same_text(self):
+        """Mixed text: only real v2 patterns should match."""
+        text = """
+        blkio.weight
+        memory.max_usage_in_bytes
+        io.weight
+        memory.max
+        """
+        result = find_cgroupv2_patterns(text)
+        assert "io.weight" in result
+        assert "memory.max" in result
 
 
 class TestIsShellScript:
@@ -428,6 +470,20 @@ exec "$@"
             tmp_path, ["/entrypoint.sh"], debug=False
         )
         assert matches == []
+        assert v2_aware is False
+
+    def test_v1_only_not_flagged_v2_aware(self, tmp_path):
+        """Script with only v1 patterns (including blkio.weight) must NOT be v2-aware."""
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
+MEM_MAX=$(cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null)
+BLKIO=$(cat /sys/fs/cgroup/blkio/blkio.weight 2>/dev/null)
+exec "$@"
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert len(matches) > 0
         assert v2_aware is False
 
     def test_source_with_variable_path(self, tmp_path):
