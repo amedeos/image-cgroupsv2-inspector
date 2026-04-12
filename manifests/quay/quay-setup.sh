@@ -357,8 +357,6 @@ build_and_push() {
         if podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
             success "  Pushed ${target}"
             PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
-            # Clean up local build image to avoid filling disk
-            podman rmi "$local_image" 2>/dev/null || true
             return 0
         fi
         if [[ $attempt -lt $MAX_RETRIES ]]; then
@@ -451,6 +449,7 @@ push_test_images() {
     build_and_push "${SCRIPT_DIR}/deep-scan-images/entrypoint-cgv1" \
         "Containerfile" "deep-scan-entrypoint-cgv1" "latest" || true
     add_tag "deep-scan-entrypoint-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-entrypoint-cgv1:latest" 2>/dev/null || true
     echo ""
 
     # --- deep-scan-source-cgv1 (built from Containerfile) ---
@@ -458,6 +457,7 @@ push_test_images() {
     build_and_push "${SCRIPT_DIR}/deep-scan-images/source-cgv1" \
         "Containerfile" "deep-scan-source-cgv1" "latest" || true
     add_tag "deep-scan-source-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-source-cgv1:latest" 2>/dev/null || true
     echo ""
 
     # --- deep-scan-binary-cgv1 (built from Containerfile, multi-stage Go) ---
@@ -465,6 +465,7 @@ push_test_images() {
     build_and_push "${SCRIPT_DIR}/deep-scan-images/binary-cgv1" \
         "Containerfile" "deep-scan-binary-cgv1" "latest" || true
     add_tag "deep-scan-binary-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-binary-cgv1:latest" 2>/dev/null || true
     echo ""
 
     # --- deep-scan-cadvisor (upstream, cgroup v1 positive) ---
