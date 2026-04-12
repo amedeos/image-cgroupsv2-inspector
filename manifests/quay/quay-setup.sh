@@ -34,6 +34,8 @@
 ###############################################################################
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---------------------------------------------------------------------------
 # Color helpers
 # ---------------------------------------------------------------------------
@@ -311,6 +313,65 @@ add_tag() {
 }
 
 # ---------------------------------------------------------------------------
+# Build → Tag → Push (for custom Containerfile-based images)
+# ---------------------------------------------------------------------------
+build_and_push() {
+    local context_dir="$1"
+    local containerfile_name="$2"
+    local repo="$3"
+    local tag="$4"
+
+    local host
+    host=$(registry_host)
+    local local_image="${repo}:${tag}"
+    local target="${host}/${ORG}/${repo}:${tag}"
+
+    info "Processing ${target} (build from ${context_dir}/${containerfile_name})"
+
+    # Build
+    info "  Building ${local_image} ..."
+    if ! podman build \
+        -t "$local_image" \
+        -f "${context_dir}/${containerfile_name}" \
+        --tls-verify="$TLS_VERIFY" \
+        "$context_dir" 2>&1; then
+        error "  Failed to build ${local_image}"
+        PUSH_FAIL=$((PUSH_FAIL + 1))
+        FAILED_IMAGES+=("${target} (build failed)")
+        return 1
+    fi
+
+    # Tag
+    info "  Tagging as ${target} ..."
+    if ! podman tag "$local_image" "$target" 2>&1; then
+        error "  Failed to tag ${local_image} -> ${target}"
+        PUSH_FAIL=$((PUSH_FAIL + 1))
+        FAILED_IMAGES+=("${target} (tag failed)")
+        return 1
+    fi
+
+    # Push (with retry)
+    local attempt
+    for attempt in $(seq 1 "$MAX_RETRIES"); do
+        info "  Pushing ${target} (attempt ${attempt}/${MAX_RETRIES}) ..."
+        if podman push "$target" --tls-verify="$TLS_VERIFY" 2>&1; then
+            success "  Pushed ${target}"
+            PUSH_SUCCESS=$((PUSH_SUCCESS + 1))
+            return 0
+        fi
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            warn "  Push failed, retrying in ${RETRY_DELAY}s ..."
+            sleep "$RETRY_DELAY"
+        fi
+    done
+
+    error "  Failed to push ${target} after ${MAX_RETRIES} attempts"
+    PUSH_FAIL=$((PUSH_FAIL + 1))
+    FAILED_IMAGES+=("${target} (push failed)")
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # Push all test images
 # ---------------------------------------------------------------------------
 push_test_images() {
@@ -372,6 +433,71 @@ push_test_images() {
     pull_tag_push "registry.access.redhat.com/ubi9-minimal:latest" \
         "no-runtime" "latest" || true
     add_tag "no-runtime" "latest" "9-${DATE_TAG}" || true
+    echo ""
+
+    # ================================================================
+    # Deep-scan test images (--deep-scan heuristic analysis)
+    # ================================================================
+    echo ""
+    info "================================================================"
+    info "  Deep-scan test images (--deep-scan heuristic analysis)"
+    info "================================================================"
+    echo ""
+
+    # --- deep-scan-entrypoint-cgv1 (built from Containerfile) ---
+    info "=== deep-scan-entrypoint-cgv1 (entrypoint with cgroup v1 paths) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/entrypoint-cgv1" \
+        "Containerfile" "deep-scan-entrypoint-cgv1" "latest" || true
+    add_tag "deep-scan-entrypoint-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-entrypoint-cgv1:latest" 2>/dev/null || true
+    echo ""
+
+    # --- deep-scan-source-cgv1 (built from Containerfile) ---
+    info "=== deep-scan-source-cgv1 (sourced scripts with cgroup v1 paths) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/source-cgv1" \
+        "Containerfile" "deep-scan-source-cgv1" "latest" || true
+    add_tag "deep-scan-source-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-source-cgv1:latest" 2>/dev/null || true
+    echo ""
+
+    # --- deep-scan-binary-cgv1 (built from Containerfile, multi-stage Go) ---
+    info "=== deep-scan-binary-cgv1 (Go binary with cgroup v1 strings) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/binary-cgv1" \
+        "Containerfile" "deep-scan-binary-cgv1" "latest" || true
+    add_tag "deep-scan-binary-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-binary-cgv1:latest" 2>/dev/null || true
+    echo ""
+
+    # --- deep-scan-cadvisor (upstream, cgroup v1 positive) ---
+    info "=== deep-scan-cadvisor (cAdvisor v0.44.0, cgroup v1 positive) ==="
+    pull_tag_push "gcr.io/cadvisor/cadvisor:v0.44.0" \
+        "deep-scan-cadvisor" "v0.44.0" || true
+    add_tag "deep-scan-cadvisor" "v0.44.0" "v0.44.0-${DATE_TAG}" || true
+    add_tag "deep-scan-cadvisor" "v0.44.0" "latest" || true
+    echo ""
+
+    # --- deep-scan-node-exporter (upstream, cgroup v1 positive) ---
+    info "=== deep-scan-node-exporter (Prometheus node-exporter v1.3.1, cgroup v1 positive) ==="
+    pull_tag_push "docker.io/prom/node-exporter:v1.3.1" \
+        "deep-scan-node-exporter" "v1.3.1" || true
+    add_tag "deep-scan-node-exporter" "v1.3.1" "v1.3.1-${DATE_TAG}" || true
+    add_tag "deep-scan-node-exporter" "v1.3.1" "latest" || true
+    echo ""
+
+    # --- deep-scan-nginx-negative (upstream, negative control) ---
+    info "=== deep-scan-nginx-negative (nginx 1.25-alpine, negative control) ==="
+    pull_tag_push "docker.io/library/nginx:1.25-alpine" \
+        "deep-scan-nginx-negative" "1.25" || true
+    add_tag "deep-scan-nginx-negative" "1.25" "1.25-${DATE_TAG}" || true
+    add_tag "deep-scan-nginx-negative" "1.25" "latest" || true
+    echo ""
+
+    # --- deep-scan-redis-negative (upstream, negative control) ---
+    info "=== deep-scan-redis-negative (redis 7-alpine, negative control) ==="
+    pull_tag_push "docker.io/library/redis:7-alpine" \
+        "deep-scan-redis-negative" "7" || true
+    add_tag "deep-scan-redis-negative" "7" "7-${DATE_TAG}" || true
+    add_tag "deep-scan-redis-negative" "7" "latest" || true
     echo ""
 }
 

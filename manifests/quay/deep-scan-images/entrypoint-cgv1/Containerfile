@@ -1,0 +1,5 @@
+FROM registry.access.redhat.com/ubi9-minimal:latest
+COPY entrypoint-cgv1.sh /usr/local/bin/entrypoint-cgv1.sh
+RUN chmod +x /usr/local/bin/entrypoint-cgv1.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint-cgv1.sh"]
+CMD ["/bin/bash", "-c", "echo running"]

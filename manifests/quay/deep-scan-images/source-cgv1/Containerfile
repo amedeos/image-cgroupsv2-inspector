@@ -1,0 +1,6 @@
+FROM registry.access.redhat.com/ubi9-minimal:latest
+COPY cgroup-helpers.sh /opt/app/cgroup-helpers.sh
+COPY entrypoint-source.sh /opt/app/entrypoint-source.sh
+RUN chmod +x /opt/app/cgroup-helpers.sh /opt/app/entrypoint-source.sh
+ENTRYPOINT ["/opt/app/entrypoint-source.sh"]
+CMD ["/bin/bash", "-c", "echo running"]

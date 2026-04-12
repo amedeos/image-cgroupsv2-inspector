@@ -62,6 +62,13 @@ TEST_REPOS=(
     dotnet-compatible
     dotnet-incompatible
     no-runtime
+    deep-scan-entrypoint-cgv1
+    deep-scan-source-cgv1
+    deep-scan-binary-cgv1
+    deep-scan-cadvisor
+    deep-scan-node-exporter
+    deep-scan-nginx-negative
+    deep-scan-redis-negative
 )
 
 # ---------------------------------------------------------------------------
@@ -229,6 +236,10 @@ cleanup_local_images() {
         "mcr.microsoft.com/dotnet/runtime:8.0"
         "mcr.microsoft.com/dotnet/core/runtime:3.0"
         "registry.access.redhat.com/ubi9-minimal:latest"
+        "gcr.io/cadvisor/cadvisor:v0.44.0"
+        "docker.io/prom/node-exporter:v1.3.1"
+        "docker.io/library/nginx:1.25-alpine"
+        "docker.io/library/redis:7-alpine"
     )
 
     info "Cleaning up upstream images ..."
@@ -238,6 +249,18 @@ cleanup_local_images() {
             podman rmi "$img" 2>/dev/null || warn "  Could not remove ${img}"
         fi
     done
+
+    # Clean up locally built deep-scan images
+    info "Cleaning up locally built deep-scan images ..."
+    local deep_scan_local
+    deep_scan_local=$(podman images --format "{{.Repository}}:{{.Tag}}" \
+        | grep -E "^(localhost/)?deep-scan-" 2>/dev/null || true)
+    if [[ -n "$deep_scan_local" ]]; then
+        while IFS= read -r img; do
+            info "  Removing local build image ${img} ..."
+            podman rmi "$img" 2>/dev/null || warn "  Could not remove ${img}"
+        done <<< "$deep_scan_local"
+    fi
 
     success "Local image cleanup complete."
     echo ""
