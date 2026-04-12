@@ -32,6 +32,7 @@ ANALYSIS_KEYS = (
     "deep_scan_confidence",
     "deep_scan_sources",
     "deep_scan_patterns",
+    "deep_scan_v2_aware",
 )
 
 

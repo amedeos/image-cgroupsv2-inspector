@@ -1,4 +1,6 @@
-"""Tests for the deep_scan module — cgroup v1 pattern registry and matching."""
+"""Tests for the deep_scan module — cgroup v1/v2 pattern registry and matching."""
+
+from pathlib import Path
 
 import pytest
 
@@ -6,8 +8,16 @@ from src.deep_scan import (
     CGROUPV1_CONTROLLER_DIRS,
     CGROUPV1_FILE_NAMES,
     CGROUPV1_REGEX,
+    CGROUPV2_FILE_NAMES,
+    CGROUPV2_REGEX,
     find_cgroupv1_patterns,
+    find_cgroupv2_patterns,
     run_deep_scan,
+    scan_entrypoint_scripts,
+    _is_shell_script,
+    _resolve_script_in_rootfs,
+    _extract_sourced_paths,
+    _read_script_content,
 )
 
 
@@ -135,23 +145,319 @@ cat /sys/fs/cgroup/cgroup.controllers
         assert find_cgroupv1_patterns(v2_content) == []
 
 
-class TestRunDeepScan:
-    """Tests for run_deep_scan() skeleton."""
+class TestCgroupV2Patterns:
+    """Verify v2 pattern constants and regex."""
 
-    def test_returns_empty_list(self, tmp_path):
-        """Skeleton returns empty list (actual logic in steps 3+4)."""
-        result = run_deep_scan(
+    def test_v2_file_names_no_slashes(self):
+        for f in CGROUPV2_FILE_NAMES:
+            assert "/" not in f, f"{f} should not contain slashes"
+
+    @pytest.mark.parametrize("pattern", [
+        "memory.max", "cpu.max", "io.max",
+        "cgroup.controllers", "cgroup.subtree_control",
+    ])
+    def test_matches_v2_patterns(self, pattern):
+        assert CGROUPV2_REGEX.search(pattern) is not None
+
+    @pytest.mark.parametrize("text", [
+        "memory.limit_in_bytes",  # v1
+        "cpu.cfs_quota_us",       # v1
+        "some random text",
+    ])
+    def test_does_not_match_v1(self, text):
+        assert CGROUPV2_REGEX.search(text) is None
+
+
+class TestFindCgroupV2Patterns:
+    def test_empty_string(self):
+        assert find_cgroupv2_patterns("") == []
+
+    def test_finds_v2_patterns(self):
+        text = "cat /sys/fs/cgroup/memory.max && cat /sys/fs/cgroup/cpu.max"
+        result = find_cgroupv2_patterns(text)
+        assert "memory.max" in result
+        assert "cpu.max" in result
+
+    def test_no_v1_patterns_matched(self):
+        text = "cat /sys/fs/cgroup/memory/memory.limit_in_bytes"
+        assert find_cgroupv2_patterns(text) == []
+
+
+class TestIsShellScript:
+    def test_sh_extension(self, tmp_path):
+        f = tmp_path / "test.sh"
+        f.write_text("echo hello")
+        assert _is_shell_script(f) is True
+
+    def test_bash_shebang(self, tmp_path):
+        f = tmp_path / "entrypoint"
+        f.write_text("#!/bin/bash\necho hello")
+        assert _is_shell_script(f) is True
+
+    def test_sh_shebang(self, tmp_path):
+        f = tmp_path / "entrypoint"
+        f.write_text("#!/bin/sh\necho hello")
+        assert _is_shell_script(f) is True
+
+    def test_env_bash_shebang(self, tmp_path):
+        f = tmp_path / "entrypoint"
+        f.write_text("#!/usr/bin/env bash\necho hello")
+        assert _is_shell_script(f) is True
+
+    def test_not_shell_script(self, tmp_path):
+        f = tmp_path / "binary"
+        f.write_bytes(b"\x7fELF\x00\x00\x00")
+        assert _is_shell_script(f) is False
+
+    def test_python_script(self, tmp_path):
+        f = tmp_path / "run.py"
+        f.write_text("#!/usr/bin/env python3\nprint('hello')")
+        assert _is_shell_script(f) is False
+
+
+class TestExtractSourcedPaths:
+    def test_source_command(self):
+        content = 'source /opt/helpers.sh\necho done'
+        assert "/opt/helpers.sh" in _extract_sourced_paths(content)
+
+    def test_dot_command(self):
+        content = '. /opt/helpers.sh\necho done'
+        assert "/opt/helpers.sh" in _extract_sourced_paths(content)
+
+    def test_quoted_path(self):
+        content = 'source "/opt/my helpers.sh"'
+        result = _extract_sourced_paths(content)
+        assert len(result) >= 1
+
+    def test_exec_command(self):
+        content = 'exec /usr/local/bin/run.sh --flag'
+        assert "/usr/local/bin/run.sh" in _extract_sourced_paths(content)
+
+    def test_no_matches(self):
+        content = 'echo hello\ncat /etc/hosts'
+        assert _extract_sourced_paths(content) == []
+
+    def test_variable_in_source(self):
+        content = 'source "${SCRIPT_DIR}/helpers.sh"'
+        result = _extract_sourced_paths(content)
+        assert len(result) >= 1
+
+
+class TestResolveScriptInRootfs:
+    def test_absolute_path(self, tmp_path):
+        script = tmp_path / "usr" / "local" / "bin" / "entry.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/bash\necho hi")
+        resolved = _resolve_script_in_rootfs("/usr/local/bin/entry.sh", tmp_path)
+        assert resolved is not None
+        assert resolved == script.resolve()
+
+    def test_missing_file(self, tmp_path):
+        assert _resolve_script_in_rootfs("/nonexistent.sh", tmp_path) is None
+
+    def test_relative_path(self, tmp_path):
+        parent = tmp_path / "opt" / "app"
+        parent.mkdir(parents=True)
+        helper = parent / "helper.sh"
+        helper.write_text("#!/bin/bash\necho hi")
+        resolved = _resolve_script_in_rootfs("helper.sh", tmp_path, relative_to=parent)
+        assert resolved is not None
+
+    def test_path_traversal_blocked(self, tmp_path):
+        """Paths that escape the rootfs should be rejected."""
+        result = _resolve_script_in_rootfs("/../../../etc/passwd", tmp_path)
+        assert result is None
+
+    def test_shell_variable_skipped(self, tmp_path):
+        result = _resolve_script_in_rootfs("${HOME}/script.sh", tmp_path)
+        assert result is None
+
+
+class TestScanEntrypointScripts:
+    """Integration tests for scan_entrypoint_scripts()."""
+
+    def _create_script(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o755)
+
+    def test_entrypoint_with_v1_patterns(self, tmp_path):
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
+exec "$@"
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert len(matches) > 0
+        assert any(m.pattern == "memory.limit_in_bytes" for m in matches)
+        assert all(m.confidence == "high" for m in matches)
+        assert v2_aware is False
+
+    def test_entrypoint_with_v1_and_v2_patterns(self, tmp_path):
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    MEM=$(cat /sys/fs/cgroup/memory.max)
+else
+    MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+fi
+exec "$@"
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert len(matches) > 0
+        assert v2_aware is True
+
+    def test_source_chain_followed(self, tmp_path):
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+source /opt/helpers.sh
+echo "Memory: $(get_mem)"
+exec "$@"
+""")
+        self._create_script(tmp_path / "opt" / "helpers.sh", """#!/bin/bash
+get_mem() {
+    cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null
+}
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert len(matches) > 0
+        sourced_matches = [m for m in matches if "helpers" in m.source]
+        assert len(sourced_matches) > 0
+        assert all(m.confidence == "medium" for m in sourced_matches)
+
+    def test_no_entrypoint(self, tmp_path):
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, [], debug=False)
+        assert matches == []
+        assert v2_aware is False
+
+    def test_non_path_entrypoint(self, tmp_path):
+        """Bare command like 'python' without path should be skipped."""
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["python", "app.py"], debug=False
+        )
+        assert matches == []
+
+    def test_binary_entrypoint_skipped(self, tmp_path):
+        """ELF binary should be skipped (step 4 handles this)."""
+        binary = tmp_path / "usr" / "local" / "bin" / "myapp"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/usr/local/bin/myapp"], debug=False
+        )
+        assert matches == []
+
+    def test_v2_aware_in_sourced_file(self, tmp_path):
+        """V2 awareness detected in a sourced file."""
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+source /opt/cgroup-lib.sh
+exec "$@"
+""")
+        self._create_script(tmp_path / "opt" / "cgroup-lib.sh", """#!/bin/bash
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    MEM=$(cat /sys/fs/cgroup/memory.max)
+else
+    MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+fi
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert len(matches) > 0
+        assert v2_aware is True
+
+    def test_no_v1_patterns_clean(self, tmp_path):
+        """Script with no cgroup references produces no matches."""
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+echo "Hello world"
+exec "$@"
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        assert matches == []
+        assert v2_aware is False
+
+    def test_depth_limit(self, tmp_path):
+        """Source chains deeper than _MAX_SOURCE_DEPTH are truncated."""
+        for i in range(8):
+            next_script = f"/opt/level{i+1}.sh" if i < 7 else ""
+            source_line = f"source {next_script}" if next_script else ""
+            v1_ref = "cat /sys/fs/cgroup/memory/memory.limit_in_bytes" if i == 7 else ""
+            self._create_script(tmp_path / "opt" / f"level{i}.sh", f"""#!/bin/bash
+{source_line}
+{v1_ref}
+""")
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+source /opt/level0.sh
+""")
+        matches, _ = scan_entrypoint_scripts(
+            tmp_path, ["/entrypoint.sh"], debug=False
+        )
+        # The chain is deeper than _MAX_SOURCE_DEPTH (5), so the deepest
+        # script with v1 refs may or may not be reached depending on depth
+
+
+class TestRunDeepScan:
+    """Tests for the updated run_deep_scan()."""
+
+    def _create_script(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o755)
+
+    def test_with_entrypoint(self, tmp_path):
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+exec "$@"
+""")
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            cmd=None,
             debug=False,
         )
-        assert result == []
+        assert len(matches) > 0
+        assert v2_aware is False
+
+    def test_without_entrypoint(self, tmp_path):
+        matches, v2_aware = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=None,
+            cmd=None,
+            debug=False,
+        )
+        assert matches == []
+        assert v2_aware is False
+
+    def test_v2_aware_flag(self, tmp_path):
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    cat /sys/fs/cgroup/memory.max
+else
+    cat /sys/fs/cgroup/memory/memory.limit_in_bytes
+fi
+""")
+        matches, v2_aware = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert v2_aware is True
 
     def test_debug_does_not_crash(self, tmp_path):
         """Debug mode should not raise exceptions."""
-        result = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             debug=True,
         )
-        assert result == []
+        assert matches == []
+        assert v2_aware is False

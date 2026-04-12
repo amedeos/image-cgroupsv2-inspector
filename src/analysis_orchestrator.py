@@ -300,3 +300,4 @@ class AnalysisOrchestrator:
                 record["deep_scan_confidence"] = result.deep_scan_confidence
                 record["deep_scan_sources"] = result.deep_scan_sources
                 record["deep_scan_patterns"] = result.deep_scan_patterns
+                record["deep_scan_v2_aware"] = result.deep_scan_v2_aware
