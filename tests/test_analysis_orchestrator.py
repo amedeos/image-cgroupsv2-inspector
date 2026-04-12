@@ -660,6 +660,7 @@ class TestApplyResultsDeepScan:
             deep_scan_matches=[
                 DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
             ],
+            deep_scan_v2_aware_flag=False,
         )
         cache = {"test:latest": result}
         AnalysisOrchestrator._apply_results(images, cache)
@@ -667,6 +668,7 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_confidence"] == "high"
         assert images[0]["deep_scan_sources"] == "/entry.sh"
         assert images[0]["deep_scan_patterns"] == "memory.limit_in_bytes"
+        assert images[0]["deep_scan_v2_aware"] == "false"
 
     def test_deep_scan_fields_empty_when_no_matches(self):
         images = [{"image_name": "test:latest"}]
@@ -677,3 +679,4 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_confidence"] == ""
         assert images[0]["deep_scan_sources"] == ""
         assert images[0]["deep_scan_patterns"] == ""
+        assert images[0]["deep_scan_v2_aware"] == ""

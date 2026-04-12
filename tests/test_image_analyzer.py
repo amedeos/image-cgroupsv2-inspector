@@ -745,3 +745,27 @@ class TestDeepScanResult:
             DeepScanMatch("/entry.sh", "p3", "high"),
         ])
         assert result.deep_scan_sources == "/entry.sh"
+
+    def test_v2_aware_property(self):
+        result = ImageAnalysisResult(
+            "t", "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
+            ],
+            deep_scan_v2_aware_flag=True,
+        )
+        assert result.deep_scan_v2_aware == "true"
+
+    def test_v2_aware_false(self):
+        result = ImageAnalysisResult(
+            "t", "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
+            ],
+            deep_scan_v2_aware_flag=False,
+        )
+        assert result.deep_scan_v2_aware == "false"
+
+    def test_v2_aware_empty_when_no_matches(self):
+        result = ImageAnalysisResult("t", "")
+        assert result.deep_scan_v2_aware == ""
