@@ -1,0 +1,8 @@
+FROM docker.io/library/golang:1.22-alpine AS builder
+WORKDIR /src
+COPY main.go .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /cgroup-reader main.go
+
+FROM registry.access.redhat.com/ubi9-minimal:latest
+COPY --from=builder /cgroup-reader /usr/local/bin/cgroup-reader
+ENTRYPOINT ["/usr/local/bin/cgroup-reader"]
