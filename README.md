@@ -30,6 +30,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 - 🔐 Store credentials in `.env` file for reuse
 - 📁 Create rootfs directory with proper extended ACLs
 - ✅ System checks: verify podman installation and disk space (min 20GB)
+- 🔍 Deep-scan heuristic analysis for cgroup v1 references in entrypoint scripts and binaries (`--deep-scan`)
 
 ## ⚠️ Disclaimer
 
@@ -467,6 +468,7 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 | `--rootfs-path` | Path where rootfs directory will be created for image extraction |
 | `--output-dir` | Directory to save CSV output (default: `output`) |
 | `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
+| `--deep-scan` | Enable heuristic deep-scan for cgroup v1 references in entrypoint scripts and binaries. Requires `--analyze`. Detects images that may not work on cgroup v2 systems even without Java/Node.js/.NET runtimes. Results appear in `deep_scan_*` CSV columns |
 | `--pull-secret` | Path to pull-secret file for image authentication (default: `.pull-secret`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
 | `--env-file` | Path to .env file for credentials (default: `.env`) |
@@ -535,7 +537,13 @@ When using the `--analyze` flag, the tool:
 4. Searches for Java, Node.js, and .NET binaries
 5. Executes `-version` / `--version` to determine the exact version
 6. Checks if the version is compatible with cgroup v2
-7. Cleans up the image and filesystem after each analysis
+7. **Deep-scan** (when `--deep-scan` is also enabled):
+   - Extracts ENTRYPOINT and CMD from image metadata via `podman inspect`
+   - Scans entrypoint shell scripts for cgroup v1 path references (high confidence)
+   - Follows `source`/`.`/`exec` chains to scan referenced scripts (medium confidence)
+   - Runs `strings` on compiled binaries (Go, C, etc.) in the entrypoint (low confidence)
+   - Detects v2-aware images that handle both cgroup v1 and v2
+8. Cleans up the image and filesystem after each analysis
 
 ### Internal Registry Support
 
@@ -580,10 +588,89 @@ oc apply -f manifests/cluster/registry-default-route.yaml
 | Node.js | 20.3.0+ |
 | .NET | 5.0+ |
 
+### Deep Scan — Heuristic cgroup v1 Detection
+
+The `--deep-scan` flag enables heuristic analysis to detect cgroup v1 references beyond Java, Node.js, and .NET version checks. This catches images with shell scripts or compiled binaries that directly read cgroup v1 files (e.g., `/sys/fs/cgroup/memory/memory.limit_in_bytes`), which will fail on cgroup v2 systems like OpenShift 4.x with RHEL 9+ nodes.
+
+**When to use:** Enable `--deep-scan` when you suspect images may have cgroup v1 dependencies outside of the standard runtime version checks — for example, custom entrypoint scripts that calculate memory/CPU limits from cgroup files, or monitoring tools like cAdvisor.
+
+#### Confidence Levels
+
+| Level | Source | Meaning |
+|-------|--------|---------|
+| **high** | Entrypoint script | cgroup v1 paths found directly in the ENTRYPOINT/CMD script. Highest signal — someone intentionally hardcoded v1 paths. You know exactly which file to fix. |
+| **medium** | Sourced script | cgroup v1 paths found in a script that is `source`d, `.`-included, or `exec`d by the entrypoint. Still a strong signal, but one level of indirection — the sourced function may not always be called. |
+| **low** | Binary (`strings`) | cgroup v1 paths found in the output of `strings` on a compiled binary. Weakest signal — the strings may exist for v2 detection logic, error messages, or documentation. Always check `deep_scan_v2_aware` for context. |
+
+#### v2-Aware Detection
+
+Some images handle both cgroup v1 and v2 by checking which version is available at runtime:
+
+```bash
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    # cgroup v2
+    MEM=$(cat /sys/fs/cgroup/memory.max)
+else
+    # cgroup v1 fallback
+    MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+fi
+```
+
+When the deep-scan finds cgroup v1 patterns in a file that **also** contains cgroup v2 patterns (like `memory.max`, `cpu.max`, `cgroup.controllers`), the image is flagged as **v2-aware** (`deep_scan_v2_aware=true`). These images likely work correctly on both cgroup v1 and v2 systems.
+
+**Interpreting results:**
+
+| `deep_scan_match` | `deep_scan_v2_aware` | Action |
+|----|----|----|
+| `false` | (empty) | No cgroup v1 references found — image is fine |
+| `true` | `true` | v1 references found but image handles both v1 and v2 — likely safe |
+| `true` | `false` | v1 references found with no v2 fallback — **investigate and remediate** |
+
+#### Source Chain Following
+
+The deep-scan follows script source chains to find cgroup v1 references in helper scripts. It handles the common pattern:
+
+```bash
+SCRIPT_DIR=$(dirname "$0")
+source "${SCRIPT_DIR}/cgroup-helpers.sh"
+```
+
+Shell variable paths like `${SCRIPT_DIR}/file.sh` are resolved by extracting the filename and looking for it relative to the sourcing script's directory.
+
+Limits: maximum source-chain depth of 5, maximum script size of 1 MB, symlinks that escape the rootfs are blocked.
+
+#### Deep Scan Example
+
+```bash
+# Registry mode with deep-scan
+./image-cgroupsv2-inspector \
+  --registry-url https://quay.example.com \
+  --registry-token <token> \
+  --registry-org my-org \
+  --rootfs-path /tmp/rootfs \
+  --analyze --deep-scan -v
+
+# Output includes:
+#   🔬 Analysis Results:
+#      Java found in: 0 containers
+#      Node.js found in: 0 containers
+#      .NET found in: 0 containers
+#      Deep-scan matches: 3 images with cgroup v1 references
+#        ⚠ high confidence: 1
+#        ⚠ low confidence: 2
+#        ✓ v2-aware (dual v1+v2 support): 2
+#        ✗ v1-only (likely incompatible): 1
+#      Images skipped (timeout): 0
+```
+
 ### Analysis Example
 
 ```bash
+# Basic analysis (Java, Node.js, .NET version checks)
 ./image-cgroupsv2-inspector --rootfs-path /tmp/analysis --analyze
+
+# Full analysis with deep-scan heuristics
+./image-cgroupsv2-inspector --rootfs-path /tmp/analysis --analyze --deep-scan
 
 # Output includes:
 #   🔬 Analysis Results:
@@ -597,6 +684,13 @@ oc apply -f manifests/cluster/registry-default-route.yaml
 #      .NET found in: 8 containers
 #        ✓ cgroup v2 compatible: 6
 #        ✗ cgroup v2 incompatible: 2
+#      Deep-scan matches: 5 images with cgroup v1 references
+#        ⚠ high confidence: 1
+#        ⚠ medium confidence: 1
+#        ⚠ low confidence: 3
+#        ✓ v2-aware (dual v1+v2 support): 2
+#        ✗ v1-only (likely incompatible): 3
+#      Images skipped (timeout): 0
 ```
 
 ## Output
@@ -626,6 +720,11 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `dotnet_version` | .NET version detected |
 | `dotnet_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
 | `analysis_error` | Error message if analysis failed |
+| `deep_scan_match` | `"true"` if cgroup v1 patterns found, `"false"` if scanned with no matches, empty if not scanned |
+| `deep_scan_confidence` | Highest confidence level: `"high"`, `"medium"`, or `"low"` (empty if no match) |
+| `deep_scan_sources` | Pipe-separated file paths where matches were found (e.g., `/entrypoint.sh\|/opt/helpers.sh` or `binary:/usr/bin/cadvisor`) |
+| `deep_scan_patterns` | Pipe-separated cgroup v1 patterns matched (e.g., `memory.limit_in_bytes\|cpu.cfs_quota_us`) |
+| `deep_scan_v2_aware` | `"true"` if matched files also contain cgroup v2 patterns, `"false"` if v1-only, empty if no match |
 
 ### Identifying Incompatible Images
 
@@ -640,6 +739,19 @@ Possible values for these fields:
 - `No` - The runtime is **NOT** compatible with cgroup v2 and requires an upgrade
 - `Unknown` - The runtime was found but its version could not be determined (e.g. the binary failed to execute inside the container)
 - `N/A` - The runtime was not found in the image
+
+#### Deep Scan Fields
+
+When `--deep-scan` is enabled, these additional fields help identify images with cgroup v1 dependencies:
+
+- **`deep_scan_match`**: If `"true"`, the image contains cgroup v1 references in its entrypoint scripts or binaries
+- **`deep_scan_v2_aware`**: If `"false"` (with `deep_scan_match=true`), the image has v1 references **without** v2 fallback logic — these are the highest priority for remediation
+- **`deep_scan_confidence`**: Indicates how reliable the finding is (`high` > `medium` > `low`)
+
+To find the most critical images, filter for:
+```csv
+deep_scan_match == "true" AND deep_scan_v2_aware == "false"
+```
 
 ### Filename Format
 
@@ -772,6 +884,20 @@ The `manifests/quay/` directory contains shell scripts that populate a Quay regi
 | `quay-setup.sh` | Verifies the Quay organization exists, then pulls upstream images and pushes them with multiple tags |
 | `quay-teardown.sh` | Deletes the test repositories and cleans up local images (the organization is never deleted) |
 
+The setup script also builds and pushes **deep-scan test images** for heuristic cgroup v1 detection testing:
+
+| Image | Type | Purpose |
+|-------|------|---------|
+| `deep-scan-entrypoint-cgv1` | Custom build | Entrypoint with cgroup v1 paths (expects: high confidence match) |
+| `deep-scan-source-cgv1` | Custom build | Sourced script with cgroup v1 paths (expects: medium confidence match) |
+| `deep-scan-binary-cgv1` | Custom build | Go binary with cgroup v1 strings (expects: low confidence match) |
+| `deep-scan-cadvisor` | Upstream (cAdvisor v0.44.0) | Go binary with extensive cgroup v1 refs, v2-aware (expects: low confidence, v2-aware) |
+| `deep-scan-node-exporter` | Upstream (node-exporter v1.3.1) | Go binary, cgroup v1 positive control |
+| `deep-scan-nginx-negative` | Upstream (nginx 1.25-alpine) | Negative control — no cgroup references expected |
+| `deep-scan-redis-negative` | Upstream (redis 7-alpine) | Negative control — no cgroup references expected |
+
+Custom images are built from Containerfiles in `manifests/quay/deep-scan-images/`.
+
 **Prerequisites:** `podman` and `curl`. The Quay organization must already exist before running the setup script.
 
 #### Setup
@@ -820,7 +946,7 @@ The setup script is idempotent and includes retry logic (3 attempts) for push op
   --registry-token <token> \
   --registry-org test-cgroupsv2 \
   --rootfs-path /tmp/rootfs \
-  --analyze \
+  --analyze --deep-scan \
   -v
 ```
 
@@ -846,11 +972,13 @@ image-cgroupsv2-inspector/
 │   ├── analysis_orchestrator.py # Source-agnostic analysis orchestration (NEW in v2.0)
 │   ├── auth_utils.py           # Registry auth.json generation (NEW in v2.0)
 │   ├── image_analyzer.py       # Image analysis for cgroups v2
+│   ├── deep_scan.py            # Deep-scan heuristic cgroup v1 detection (NEW)
 │   ├── rootfs_manager.py       # RootFS directory management
 │   └── system_checks.py        # System requirements verification
 ├── tests/
 │   ├── __init__.py
 │   ├── test_image_analyzer.py
+│   ├── test_deep_scan.py             # NEW
 │   ├── test_image_collector.py
 │   ├── test_openshift_client.py
 │   ├── test_quay_client.py           # NEW in v2.0
@@ -865,7 +993,11 @@ image-cgroupsv2-inspector/
     │   └── ...
     └── quay/                   # Quay test environment scripts (NEW in v2.0)
         ├── quay-setup.sh
-        └── quay-teardown.sh
+        ├── quay-teardown.sh
+        └── deep-scan-images/   # Containerfiles for deep-scan test images (NEW)
+            ├── entrypoint-cgv1/
+            ├── source-cgv1/
+            └── binary-cgv1/
 ```
 
 ## Development
