@@ -18,6 +18,9 @@ from src.deep_scan import (
     _resolve_script_in_rootfs,
     _extract_sourced_paths,
     _read_script_content,
+    _is_elf_binary,
+    _run_strings,
+    scan_binary_strings,
 )
 
 
@@ -458,6 +461,278 @@ fi
             extract_path=tmp_path,
             image_name="test:latest",
             debug=True,
+        )
+        assert matches == []
+        assert v2_aware is False
+
+
+class TestIsElfBinary:
+    def test_elf_binary(self, tmp_path):
+        binary = tmp_path / "myapp"
+        binary.write_bytes(b"\x7fELF" + b"\x02\x01\x01\x00" * 100)
+        assert _is_elf_binary(binary) is True
+
+    def test_shell_script(self, tmp_path):
+        script = tmp_path / "run.sh"
+        script.write_text("#!/bin/bash\necho hello")
+        assert _is_elf_binary(script) is False
+
+    def test_empty_file(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.write_bytes(b"")
+        assert _is_elf_binary(empty) is False
+
+    def test_short_file(self, tmp_path):
+        short = tmp_path / "short"
+        short.write_bytes(b"\x7f")
+        assert _is_elf_binary(short) is False
+
+    def test_nonexistent_file(self, tmp_path):
+        assert _is_elf_binary(tmp_path / "nonexistent") is False
+
+
+class TestRunStrings:
+    def _create_binary_with_strings(self, path: Path, embedded_strings: list[str]) -> None:
+        """Create a fake binary with embedded readable strings."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = b"\x7fELF" + b"\x00" * 100
+        for s in embedded_strings:
+            content += s.encode("utf-8") + b"\x00" * 10
+        content += b"\x00" * 100
+        path.write_bytes(content)
+
+    def test_extracts_strings(self, tmp_path):
+        binary = tmp_path / "myapp"
+        self._create_binary_with_strings(binary, [
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "some_other_long_string_here",
+        ])
+        result = _run_strings(binary)
+        assert result is not None
+        assert "memory.limit_in_bytes" in result
+
+    def test_empty_file(self, tmp_path):
+        binary = tmp_path / "empty"
+        binary.write_bytes(b"")
+        result = _run_strings(binary)
+        assert result is None
+
+    def test_nonexistent_file(self, tmp_path):
+        result = _run_strings(tmp_path / "nonexistent")
+        assert result is None
+
+
+class TestScanBinaryStrings:
+    def _create_binary_with_strings(self, path: Path, embedded_strings: list[str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = b"\x7fELF" + b"\x00" * 100
+        for s in embedded_strings:
+            content += s.encode("utf-8") + b"\x00" * 10
+        content += b"\x00" * 100
+        path.write_bytes(content)
+
+    def test_binary_with_v1_patterns(self, tmp_path):
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "myapp",
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
+            ],
+        )
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/myapp"], debug=False
+        )
+        assert len(matches) > 0
+        assert all(m.confidence == "low" for m in matches)
+        assert all(m.source.startswith("binary:") for m in matches)
+        assert any("memory.limit_in_bytes" in m.pattern for m in matches)
+        assert v2_aware is False
+
+    def test_binary_with_v1_and_v2_patterns(self, tmp_path):
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "myapp",
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cgroup.controllers",
+                "memory.max_is_a_long_enough_string",
+            ],
+        )
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/myapp"], debug=False
+        )
+        assert len(matches) > 0
+        assert v2_aware is True
+
+    def test_binary_without_v1_patterns(self, tmp_path):
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "cleanapp",
+            ["just_some_random_long_string_here", "another_normal_string_data"],
+        )
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/cleanapp"], debug=False
+        )
+        assert matches == []
+        assert v2_aware is False
+
+    def test_nonexistent_binary_skipped(self, tmp_path):
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/nonexistent"], debug=False
+        )
+        assert matches == []
+
+    def test_shell_script_skipped(self, tmp_path):
+        script = tmp_path / "usr" / "bin" / "run.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes")
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/run.sh"], debug=False
+        )
+        assert matches == []
+
+    def test_multiple_binaries(self, tmp_path):
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "app1",
+            ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
+        )
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "app2",
+            ["/sys/fs/cgroup/cpu/cpu.cfs_quota_us"],
+        )
+        matches, v2_aware = scan_binary_strings(
+            tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False
+        )
+        assert len(matches) >= 2
+        sources = {m.source for m in matches}
+        assert "binary:/usr/bin/app1" in sources
+        assert "binary:/usr/bin/app2" in sources
+
+    def test_duplicate_binary_refs_deduplicated(self, tmp_path):
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "myapp",
+            ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
+        )
+        matches, _ = scan_binary_strings(
+            tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False
+        )
+        pattern_count = sum(1 for m in matches if m.pattern == "memory.limit_in_bytes")
+        assert pattern_count == 1
+
+    def test_source_prefix_is_binary(self, tmp_path):
+        """Verify the source field uses the binary: prefix."""
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "local" / "bin" / "cgroup-reader",
+            ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
+        )
+        matches, _ = scan_binary_strings(
+            tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False
+        )
+        assert len(matches) > 0
+        assert matches[0].source == "binary:/usr/local/bin/cgroup-reader"
+
+
+class TestRunDeepScanWithBinary:
+    """Test run_deep_scan integration with binary scanning (step 4)."""
+
+    def _create_binary_with_strings(self, path: Path, embedded_strings: list[str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = b"\x7fELF" + b"\x00" * 100
+        for s in embedded_strings:
+            content += s.encode("utf-8") + b"\x00" * 10
+        content += b"\x00" * 100
+        path.write_bytes(content)
+
+    def _create_script(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o755)
+
+    def test_binary_entrypoint_scanned(self, tmp_path):
+        """When entrypoint is a binary, strings scan should find patterns."""
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "cadvisor",
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
+                "/sys/fs/cgroup/cpuacct/cpuacct.usage",
+            ],
+        )
+        matches, v2_aware = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="cadvisor:v0.44.0",
+            entrypoint=["/usr/bin/cadvisor"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert all(m.confidence == "low" for m in matches)
+        assert all("binary:" in m.source for m in matches)
+
+    def test_script_entrypoint_not_double_scanned(self, tmp_path):
+        """Shell script entrypoint should only produce high/medium matches, not low."""
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
+exec "$@"
+""")
+        matches, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert all(m.confidence == "high" for m in matches)
+        assert not any("binary:" in m.source for m in matches)
+
+    def test_binary_with_v2_awareness(self, tmp_path):
+        """Binary containing both v1 and v2 patterns should be flagged v2-aware."""
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "monitor",
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cgroup.controllers",
+                "memory.max_and_some_padding",
+            ],
+        )
+        matches, v2_aware = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="monitor:latest",
+            entrypoint=["/usr/bin/monitor"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert v2_aware is True
+
+    def test_mixed_script_and_binary_args(self, tmp_path):
+        """When entrypoint is a script and CMD has a binary, both are scanned."""
+        self._create_script(tmp_path / "wrapper.sh", """#!/bin/bash
+echo "starting"
+exec "$@"
+""")
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "myapp",
+            ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
+        )
+        matches, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/wrapper.sh"],
+            cmd=["/usr/bin/myapp"],
+            debug=False,
+        )
+        binary_matches = [m for m in matches if "binary:" in m.source]
+        assert len(binary_matches) > 0
+        assert all(m.confidence == "low" for m in binary_matches)
+
+    def test_no_matches_in_clean_binary(self, tmp_path):
+        """Binary without cgroup refs should produce no matches."""
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "bin" / "nginx",
+            ["welcome_to_nginx_server", "http_proxy_module_loaded"],
+        )
+        matches, v2_aware = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="nginx:latest",
+            entrypoint=["/usr/bin/nginx"],
+            debug=False,
         )
         assert matches == []
         assert v2_aware is False

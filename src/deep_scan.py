@@ -241,6 +241,152 @@ def _read_script_content(file_path: Path) -> str | None:
         return None
 
 
+_MAX_BINARY_SIZE = 200 * 1024 * 1024  # 200 MB
+
+_STRINGS_MIN_LENGTH = 8
+
+
+def _is_elf_binary(file_path: Path) -> bool:
+    """Check if a file is an ELF binary by reading its magic bytes."""
+    try:
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        return magic == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def _run_strings(file_path: Path, debug: bool = False) -> str | None:
+    """Run the `strings` command on a binary file.
+
+    Args:
+        file_path: Path to the binary file.
+        debug: Enable debug output.
+
+    Returns:
+        The strings output as a single string, or None if strings fails
+        or the binary is too large.
+    """
+    import subprocess
+
+    try:
+        file_size = file_path.stat().st_size
+        if file_size > _MAX_BINARY_SIZE:
+            if debug:
+                print(f"      [DEBUG] Binary too large for strings: {file_size} bytes > {_MAX_BINARY_SIZE}")
+            return None
+        if file_size == 0:
+            return None
+    except OSError:
+        return None
+
+    try:
+        result = subprocess.run(
+            ["strings", f"-n{_STRINGS_MIN_LENGTH}", str(file_path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            if debug:
+                print(f"      [DEBUG] strings command failed: {result.stderr[:200]}")
+            return None
+        return result.stdout
+    except FileNotFoundError:
+        if debug:
+            print("      [DEBUG] 'strings' command not found in PATH")
+        return None
+    except subprocess.TimeoutExpired:
+        if debug:
+            print("      [DEBUG] strings command timed out")
+        return None
+    except Exception as e:
+        if debug:
+            print(f"      [DEBUG] strings error: {e}")
+        return None
+
+
+def scan_binary_strings(
+    extract_path: Path,
+    binary_refs: list[str],
+    debug: bool = False,
+) -> tuple[list, bool]:
+    """Scan binary files via `strings` for cgroup v1 references.
+
+    For each binary reference:
+    1. Resolve it in the extracted rootfs
+    2. Verify it's an ELF binary
+    3. Run `strings` on it
+    4. Check the output for cgroup v1 patterns
+    5. Check for cgroup v2 patterns (v2-awareness)
+
+    Args:
+        extract_path: Path to the extracted container rootfs.
+        binary_refs: List of container paths to check (e.g. ["/usr/bin/cadvisor"]).
+        debug: Enable debug output.
+
+    Returns:
+        Tuple of (matches, v2_aware):
+        - matches: list of DeepScanMatch objects with confidence="low"
+        - v2_aware: True if any binary contains both v1 and v2 patterns
+    """
+    from .image_analyzer import DeepScanMatch
+
+    matches: list[DeepScanMatch] = []
+    v2_aware = False
+    scanned_binaries: set[str] = set()
+
+    for binary_ref in binary_refs:
+        resolved = _resolve_script_in_rootfs(binary_ref, extract_path)
+        if resolved is None:
+            if debug:
+                print(f"      [DEBUG] Could not resolve binary in rootfs: {binary_ref}")
+            continue
+
+        real_path_str = str(resolved.resolve())
+        if real_path_str in scanned_binaries:
+            continue
+        scanned_binaries.add(real_path_str)
+
+        if not _is_elf_binary(resolved):
+            if debug:
+                print(f"      [DEBUG] Not an ELF binary, skipping: {binary_ref}")
+            continue
+
+        if debug:
+            try:
+                size_mb = resolved.stat().st_size / (1024 * 1024)
+                print(f"      [DEBUG] Running strings on binary: {binary_ref} ({size_mb:.1f} MB)")
+            except OSError:
+                print(f"      [DEBUG] Running strings on binary: {binary_ref}")
+
+        strings_output = _run_strings(resolved, debug=debug)
+        if strings_output is None:
+            continue
+
+        v1_patterns = find_cgroupv1_patterns(strings_output)
+        if v1_patterns:
+            source = f"binary:{binary_ref}"
+            for pattern in v1_patterns:
+                matches.append(DeepScanMatch(
+                    source=source,
+                    pattern=pattern,
+                    confidence="low",
+                ))
+            if debug:
+                print(f"      [DEBUG]   Found {len(v1_patterns)} cgroup v1 patterns in {binary_ref}")
+
+            v2_patterns = find_cgroupv2_patterns(strings_output)
+            if v2_patterns:
+                v2_aware = True
+                if debug:
+                    print(f"      [DEBUG]   Also found {len(v2_patterns)} cgroup v2 patterns → v2-aware")
+        elif debug:
+            print(f"      [DEBUG]   No cgroup v1 patterns found in {binary_ref}")
+
+    return matches, v2_aware
+
+
 def _extract_sourced_paths(content: str) -> list[str]:
     """Extract file paths from source/. and exec statements in a shell script."""
     paths: list[str] = []
@@ -431,6 +577,25 @@ def run_deep_scan(
         if scripts_v2_aware:
             v2_aware = True
 
-    # Step 4 (future): Binary strings scanning will be added here
+    # Step 4: Binary strings scanning
+    binary_refs: list[str] = []
+    for ref in combined:
+        if "/" not in ref or ref.startswith("-"):
+            continue
+        resolved = _resolve_script_in_rootfs(ref, extract_path)
+        if resolved is not None and not _is_shell_script(resolved) and _is_elf_binary(resolved):
+            binary_refs.append(ref)
+
+    if binary_refs:
+        if debug:
+            print(f"      [DEBUG] Binary refs to scan with strings: {binary_refs}")
+        binary_matches, binary_v2_aware = scan_binary_strings(
+            extract_path=extract_path,
+            binary_refs=binary_refs,
+            debug=debug,
+        )
+        all_matches.extend(binary_matches)
+        if binary_v2_aware:
+            v2_aware = True
 
     return all_matches, v2_aware
