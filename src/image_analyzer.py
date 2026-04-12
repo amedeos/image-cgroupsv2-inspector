@@ -31,6 +31,15 @@ class BinaryInfo:
 
 
 @dataclass
+class DeepScanMatch:
+    """A single cgroup v1 heuristic match."""
+
+    source: str          # file where the match was found, e.g. "/entrypoint.sh"
+    pattern: str         # the cgroup v1 pattern matched, e.g. "memory.limit_in_bytes"
+    confidence: str      # "high", "medium", or "low"
+
+
+@dataclass
 class ImageAnalysisResult:
     """Result of analyzing a container image."""
 
@@ -39,6 +48,7 @@ class ImageAnalysisResult:
     java_binaries: list[BinaryInfo] = field(default_factory=list)
     node_binaries: list[BinaryInfo] = field(default_factory=list)
     dotnet_binaries: list[BinaryInfo] = field(default_factory=list)
+    deep_scan_matches: list[DeepScanMatch] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -113,6 +123,44 @@ class ImageAnalysisResult:
         compatible = all(b.is_compatible for b in self.dotnet_binaries)
         return "Yes" if compatible else "No"
 
+    @property
+    def deep_scan_match(self) -> str:
+        """Return 'true' if any cgroup v1 pattern was found, 'false' otherwise, '' if not scanned."""
+        if not hasattr(self, 'deep_scan_matches') or self.deep_scan_matches is None:
+            return ""
+        return "true" if self.deep_scan_matches else "false"
+
+    @property
+    def deep_scan_confidence(self) -> str:
+        """Return the highest confidence level among all matches.
+
+        Priority: high > medium > low. Empty string if no matches or not scanned.
+        """
+        if not self.deep_scan_matches:
+            return ""
+        levels = {m.confidence for m in self.deep_scan_matches}
+        if "high" in levels:
+            return "high"
+        if "medium" in levels:
+            return "medium"
+        return "low"
+
+    @property
+    def deep_scan_sources(self) -> str:
+        """Return pipe-separated unique source files where matches were found."""
+        if not self.deep_scan_matches:
+            return ""
+        sources = dict.fromkeys(m.source for m in self.deep_scan_matches)
+        return "|".join(sources)
+
+    @property
+    def deep_scan_patterns(self) -> str:
+        """Return pipe-separated unique patterns matched."""
+        if not self.deep_scan_matches:
+            return ""
+        patterns = dict.fromkeys(m.pattern for m in self.deep_scan_matches)
+        return "|".join(patterns)
+
 
 class ImageAnalyzer:
     """
@@ -175,6 +223,7 @@ class ImageAnalyzer:
         pull_secret_path: str | None = None,
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
+        deep_scan: bool = False,
     ):
         """
         Initialize the image analyzer.
@@ -188,12 +237,14 @@ class ImageAnalyzer:
                 are rewritten to use this route so podman can pull them.
             openshift_token: Bearer token for authenticating to the internal
                 registry route via ``podman login``.
+            deep_scan: Enable heuristic deep-scan for cgroup v1 references.
         """
         self.rootfs_base = Path(rootfs_base_path).resolve()
         self.rootfs_path = self.rootfs_base / "rootfs"
         self.pull_secret_path = Path(pull_secret_path) if pull_secret_path else None
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
+        self.deep_scan = deep_scan
         self._registry_logged_in = False
 
         # Ensure rootfs directory exists
@@ -1125,6 +1176,16 @@ class ImageAnalyzer:
                         runtime_type=".NET",
                     )
                 )
+
+            # Deep scan: heuristic cgroup v1 detection
+            if self.deep_scan:
+                from .deep_scan import run_deep_scan
+                deep_matches = run_deep_scan(
+                    extract_path=extract_path,
+                    image_name=podman_image,
+                    debug=debug,
+                )
+                result.deep_scan_matches = deep_matches
 
             # Report findings
             if result.java_binaries:
