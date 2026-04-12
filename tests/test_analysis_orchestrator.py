@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.analysis_orchestrator import AnalysisOrchestrator
-from src.image_analyzer import BinaryInfo, ImageAnalysisResult
+from src.image_analyzer import BinaryInfo, DeepScanMatch, ImageAnalysisResult
 from src.registry_collector import CSV_COLUMNS
 from src.scan_state import ScanState
 
@@ -30,6 +30,16 @@ def orchestrator():
     return AnalysisOrchestrator(
         rootfs_path="/tmp/rootfs",
         pull_secret_path=".pull-secret",
+    )
+
+
+@pytest.fixture
+def orchestrator_deep_scan():
+    """Create an AnalysisOrchestrator with deep-scan enabled."""
+    return AnalysisOrchestrator(
+        rootfs_path="/tmp/rootfs",
+        pull_secret_path=".pull-secret",
+        deep_scan=True,
     )
 
 
@@ -361,6 +371,7 @@ class TestAnalysisOrchestratorOpenShift:
                 None,
                 "registry.apps.example.com",
                 "sha256~token123",
+                deep_scan=False,
             )
 
     def test_openshift_token_passed_to_analyzer(self):
@@ -632,3 +643,37 @@ class TestAnalysisOrchestratorResume:
         """--clean-state with no existing file: no error."""
         state_path = tmp_path / ".state_missing.json"
         assert not state_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# TestApplyResultsDeepScan
+# ---------------------------------------------------------------------------
+
+
+class TestApplyResultsDeepScan:
+    """Tests for _apply_results with deep scan fields."""
+
+    def test_deep_scan_fields_mapped(self):
+        images = [{"image_name": "test:latest"}]
+        result = ImageAnalysisResult(
+            image_name="test:latest", image_id="abc",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
+            ],
+        )
+        cache = {"test:latest": result}
+        AnalysisOrchestrator._apply_results(images, cache)
+        assert images[0]["deep_scan_match"] == "true"
+        assert images[0]["deep_scan_confidence"] == "high"
+        assert images[0]["deep_scan_sources"] == "/entry.sh"
+        assert images[0]["deep_scan_patterns"] == "memory.limit_in_bytes"
+
+    def test_deep_scan_fields_empty_when_no_matches(self):
+        images = [{"image_name": "test:latest"}]
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
+        cache = {"test:latest": result}
+        AnalysisOrchestrator._apply_results(images, cache)
+        assert images[0]["deep_scan_match"] == "false"
+        assert images[0]["deep_scan_confidence"] == ""
+        assert images[0]["deep_scan_sources"] == ""
+        assert images[0]["deep_scan_patterns"] == ""
