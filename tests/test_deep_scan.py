@@ -48,28 +48,34 @@ class TestCgroupV1Patterns:
 class TestCgroupV1Regex:
     """Verify the compiled regex matches expected patterns."""
 
-    @pytest.mark.parametrize("pattern", [
-        "/sys/fs/cgroup/memory/",
-        "/sys/fs/cgroup/cpu/",
-        "/sys/fs/cgroup/cpuacct/",
-        "/sys/fs/cgroup/blkio/",
-        "memory.limit_in_bytes",
-        "cpu.cfs_quota_us",
-        "cpuacct.usage",
-        "blkio.weight",
-    ])
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "/sys/fs/cgroup/memory/",
+            "/sys/fs/cgroup/cpu/",
+            "/sys/fs/cgroup/cpuacct/",
+            "/sys/fs/cgroup/blkio/",
+            "memory.limit_in_bytes",
+            "cpu.cfs_quota_us",
+            "cpuacct.usage",
+            "blkio.weight",
+        ],
+    )
     def test_matches_v1_patterns(self, pattern):
         assert CGROUPV1_REGEX.search(pattern) is not None
 
-    @pytest.mark.parametrize("text", [
-        "memory.max",           # cgroup v2
-        "cpu.max",              # cgroup v2
-        "io.max",               # cgroup v2
-        "/sys/fs/cgroup/",      # just the base dir, not v1-specific
-        "cgroup.controllers",   # cgroup v2
-        "cgroup.subtree_control",  # cgroup v2
-        "some random text",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "memory.max",  # cgroup v2
+            "cpu.max",  # cgroup v2
+            "io.max",  # cgroup v2
+            "/sys/fs/cgroup/",  # just the base dir, not v1-specific
+            "cgroup.controllers",  # cgroup v2
+            "cgroup.subtree_control",  # cgroup v2
+            "some random text",
+        ],
+    )
     def test_does_not_match_v2_or_generic(self, text):
         assert CGROUPV1_REGEX.search(text) is None
 
@@ -81,7 +87,7 @@ class TestFindCgroupV1Patterns:
         assert find_cgroupv1_patterns("") == []
 
     def test_single_match(self):
-        text = 'cat /sys/fs/cgroup/memory/memory.limit_in_bytes'
+        text = "cat /sys/fs/cgroup/memory/memory.limit_in_bytes"
         result = find_cgroupv1_patterns(text)
         assert "/sys/fs/cgroup/memory/" in result
         assert "memory.limit_in_bytes" in result
@@ -154,25 +160,37 @@ class TestCgroupV2Patterns:
         for f in CGROUPV2_FILE_NAMES:
             assert "/" not in f, f"{f} should not contain slashes"
 
-    @pytest.mark.parametrize("pattern", [
-        "memory.max", "cpu.max", "io.max",
-        "cgroup.controllers", "cgroup.subtree_control",
-    ])
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "memory.max",
+            "cpu.max",
+            "io.max",
+            "cgroup.controllers",
+            "cgroup.subtree_control",
+        ],
+    )
     def test_matches_v2_patterns(self, pattern):
         assert CGROUPV2_REGEX.search(pattern) is not None
 
-    @pytest.mark.parametrize("text", [
-        "memory.limit_in_bytes",  # v1
-        "cpu.cfs_quota_us",       # v1
-        "some random text",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "memory.limit_in_bytes",  # v1
+            "cpu.cfs_quota_us",  # v1
+            "some random text",
+        ],
+    )
     def test_does_not_match_v1(self, text):
         assert CGROUPV2_REGEX.search(text) is None
 
-    @pytest.mark.parametrize("text", [
-        "blkio.weight",              # v1 — contains "io.weight" as substring
-        "memory.max_usage_in_bytes", # v1 — contains "memory.max" as substring
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "blkio.weight",  # v1 — contains "io.weight" as substring
+            "memory.max_usage_in_bytes",  # v1 — contains "memory.max" as substring
+        ],
+    )
     def test_does_not_match_v1_superstrings(self, text):
         """V2 regex must not match when the v2 pattern is embedded inside a v1 pattern."""
         assert CGROUPV2_REGEX.search(text) is None
@@ -261,11 +279,11 @@ class TestIsShellScript:
 
 class TestExtractSourcedPaths:
     def test_source_command(self):
-        content = 'source /opt/helpers.sh\necho done'
+        content = "source /opt/helpers.sh\necho done"
         assert "/opt/helpers.sh" in _extract_sourced_paths(content)
 
     def test_dot_command(self):
-        content = '. /opt/helpers.sh\necho done'
+        content = ". /opt/helpers.sh\necho done"
         assert "/opt/helpers.sh" in _extract_sourced_paths(content)
 
     def test_quoted_path(self):
@@ -274,11 +292,11 @@ class TestExtractSourcedPaths:
         assert len(result) >= 1
 
     def test_exec_command(self):
-        content = 'exec /usr/local/bin/run.sh --flag'
+        content = "exec /usr/local/bin/run.sh --flag"
         assert "/usr/local/bin/run.sh" in _extract_sourced_paths(content)
 
     def test_no_matches(self):
-        content = 'echo hello\ncat /etc/hosts'
+        content = "echo hello\ncat /etc/hosts"
         assert _extract_sourced_paths(content) == []
 
     def test_variable_in_source(self):
@@ -323,9 +341,7 @@ class TestResolveScriptInRootfs:
         parent.mkdir(parents=True)
         helper = parent / "cgroup-helpers.sh"
         helper.write_text("#!/bin/bash\nget_mem() { echo 1; }")
-        resolved = _resolve_script_in_rootfs(
-            "${SCRIPT_DIR}/cgroup-helpers.sh", tmp_path, relative_to=parent
-        )
+        resolved = _resolve_script_in_rootfs("${SCRIPT_DIR}/cgroup-helpers.sh", tmp_path, relative_to=parent)
         assert resolved is not None
         assert resolved.name == "cgroup-helpers.sh"
 
@@ -347,9 +363,7 @@ class TestResolveScriptInRootfs:
         parent.mkdir(parents=True)
         helper = parent / "helpers.sh"
         helper.write_text("#!/bin/bash\necho hi")
-        resolved = _resolve_script_in_rootfs(
-            "$DIR/helpers.sh", tmp_path, relative_to=parent
-        )
+        resolved = _resolve_script_in_rootfs("$DIR/helpers.sh", tmp_path, relative_to=parent)
         assert resolved is not None
         assert resolved.name == "helpers.sh"
 
@@ -357,9 +371,7 @@ class TestResolveScriptInRootfs:
         """Variable-based path should still respect rootfs boundary."""
         parent = tmp_path / "opt"
         parent.mkdir(parents=True)
-        result = _resolve_script_in_rootfs(
-            "${DIR}/../../etc/passwd", tmp_path, relative_to=parent
-        )
+        result = _resolve_script_in_rootfs("${DIR}/../../etc/passwd", tmp_path, relative_to=parent)
         assert result is None
 
 
@@ -372,47 +384,53 @@ class TestScanEntrypointScripts:
         path.chmod(0o755)
 
     def test_entrypoint_with_v1_patterns(self, tmp_path):
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
 exec "$@"
-""")
-        matches, v2_aware = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert any(m.pattern == "memory.limit_in_bytes" for m in matches)
         assert all(m.confidence == "high" for m in matches)
         assert v2_aware is False
 
     def test_entrypoint_with_v1_and_v2_patterns(self, tmp_path):
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     MEM=$(cat /sys/fs/cgroup/memory.max)
 else
     MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 fi
 exec "$@"
-""")
-        matches, v2_aware = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
     def test_source_chain_followed(self, tmp_path):
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 source /opt/helpers.sh
 echo "Memory: $(get_mem)"
 exec "$@"
-""")
-        self._create_script(tmp_path / "opt" / "helpers.sh", """#!/bin/bash
+""",
+        )
+        self._create_script(
+            tmp_path / "opt" / "helpers.sh",
+            """#!/bin/bash
 get_mem() {
     cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null
 }
-""")
-        matches, _ = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         sourced_matches = [m for m in matches if "helpers" in m.source]
         assert len(sourced_matches) > 0
@@ -425,9 +443,7 @@ get_mem() {
 
     def test_non_path_entrypoint(self, tmp_path):
         """Bare command like 'python' without path should be skipped."""
-        matches, _ = scan_entrypoint_scripts(
-            tmp_path, ["python", "app.py"], debug=False
-        )
+        matches, _ = scan_entrypoint_scripts(tmp_path, ["python", "app.py"], debug=False)
         assert matches == []
 
     def test_binary_entrypoint_skipped(self, tmp_path):
@@ -435,72 +451,80 @@ get_mem() {
         binary = tmp_path / "usr" / "local" / "bin" / "myapp"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        matches, _ = scan_entrypoint_scripts(
-            tmp_path, ["/usr/local/bin/myapp"], debug=False
-        )
+        matches, _ = scan_entrypoint_scripts(tmp_path, ["/usr/local/bin/myapp"], debug=False)
         assert matches == []
 
     def test_v2_aware_in_sourced_file(self, tmp_path):
         """V2 awareness detected in a sourced file."""
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 source /opt/cgroup-lib.sh
 exec "$@"
-""")
-        self._create_script(tmp_path / "opt" / "cgroup-lib.sh", """#!/bin/bash
+""",
+        )
+        self._create_script(
+            tmp_path / "opt" / "cgroup-lib.sh",
+            """#!/bin/bash
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     MEM=$(cat /sys/fs/cgroup/memory.max)
 else
     MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 fi
-""")
-        matches, v2_aware = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
     def test_no_v1_patterns_clean(self, tmp_path):
         """Script with no cgroup references produces no matches."""
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 echo "Hello world"
 exec "$@"
-""")
-        matches, v2_aware = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert matches == []
         assert v2_aware is False
 
     def test_v1_only_not_flagged_v2_aware(self, tmp_path):
         """Script with only v1 patterns (including blkio.weight) must NOT be v2-aware."""
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
 MEM_MAX=$(cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null)
 BLKIO=$(cat /sys/fs/cgroup/blkio/blkio.weight 2>/dev/null)
 exec "$@"
-""")
-        matches, v2_aware = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is False
 
     def test_source_with_variable_path(self, tmp_path):
         """source "${SCRIPT_DIR}/file.sh" pattern should be followed."""
-        self._create_script(tmp_path / "opt" / "app" / "entrypoint-source.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "opt" / "app" / "entrypoint-source.sh",
+            """#!/bin/bash
 SCRIPT_DIR=$(dirname "$0")
 source "${SCRIPT_DIR}/cgroup-helpers.sh"
 echo "Memory: $(get_memory_limit)"
 exec "$@"
-""")
-        self._create_script(tmp_path / "opt" / "app" / "cgroup-helpers.sh", """#!/bin/bash
+""",
+        )
+        self._create_script(
+            tmp_path / "opt" / "app" / "cgroup-helpers.sh",
+            """#!/bin/bash
 get_memory_limit() {
     cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0"
 }
-""")
-        matches, _ = scan_entrypoint_scripts(
-            tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False
+""",
         )
+        matches, _ = scan_entrypoint_scripts(tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False)
         assert len(matches) > 0
         assert any("memory.limit_in_bytes" in m.pattern for m in matches)
         sourced_matches = [m for m in matches if "cgroup-helpers" in m.source]
@@ -510,19 +534,23 @@ get_memory_limit() {
     def test_depth_limit(self, tmp_path):
         """Source chains deeper than _MAX_SOURCE_DEPTH are truncated."""
         for i in range(8):
-            next_script = f"/opt/level{i+1}.sh" if i < 7 else ""
+            next_script = f"/opt/level{i + 1}.sh" if i < 7 else ""
             source_line = f"source {next_script}" if next_script else ""
             v1_ref = "cat /sys/fs/cgroup/memory/memory.limit_in_bytes" if i == 7 else ""
-            self._create_script(tmp_path / "opt" / f"level{i}.sh", f"""#!/bin/bash
+            self._create_script(
+                tmp_path / "opt" / f"level{i}.sh",
+                f"""#!/bin/bash
 {source_line}
 {v1_ref}
-""")
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+""",
+            )
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 source /opt/level0.sh
-""")
-        _, _ = scan_entrypoint_scripts(
-            tmp_path, ["/entrypoint.sh"], debug=False
+""",
         )
+        _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         # The chain is deeper than _MAX_SOURCE_DEPTH (5), so the deepest
         # script with v1 refs may or may not be reached depending on depth
 
@@ -536,10 +564,13 @@ class TestRunDeepScan:
         path.chmod(0o755)
 
     def test_with_entrypoint(self, tmp_path):
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
-""")
+""",
+        )
         matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
@@ -562,13 +593,16 @@ exec "$@"
         assert v2_aware is False
 
     def test_v2_aware_flag(self, tmp_path):
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     cat /sys/fs/cgroup/memory.max
 else
     cat /sys/fs/cgroup/memory/memory.limit_in_bytes
 fi
-""")
+""",
+        )
         matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
@@ -626,10 +660,13 @@ class TestRunStrings:
 
     def test_extracts_strings(self, tmp_path):
         binary = tmp_path / "myapp"
-        self._create_binary_with_strings(binary, [
-            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-            "some_other_long_string_here",
-        ])
+        self._create_binary_with_strings(
+            binary,
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "some_other_long_string_here",
+            ],
+        )
         result = _run_strings(binary)
         assert result is not None
         assert "memory.limit_in_bytes" in result
@@ -662,9 +699,7 @@ class TestScanBinaryStrings:
                 "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
             ],
         )
-        matches, v2_aware = scan_binary_strings(
-            tmp_path, ["/usr/bin/myapp"], debug=False
-        )
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert all(m.confidence == "low" for m in matches)
         assert all(m.source.startswith("binary:") for m in matches)
@@ -680,9 +715,7 @@ class TestScanBinaryStrings:
                 "memory.max_is_a_long_enough_string",
             ],
         )
-        matches, v2_aware = scan_binary_strings(
-            tmp_path, ["/usr/bin/myapp"], debug=False
-        )
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
@@ -691,25 +724,19 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "cleanapp",
             ["just_some_random_long_string_here", "another_normal_string_data"],
         )
-        matches, v2_aware = scan_binary_strings(
-            tmp_path, ["/usr/bin/cleanapp"], debug=False
-        )
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/cleanapp"], debug=False)
         assert matches == []
         assert v2_aware is False
 
     def test_nonexistent_binary_skipped(self, tmp_path):
-        matches, _ = scan_binary_strings(
-            tmp_path, ["/usr/bin/nonexistent"], debug=False
-        )
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/nonexistent"], debug=False)
         assert matches == []
 
     def test_shell_script_skipped(self, tmp_path):
         script = tmp_path / "usr" / "bin" / "run.sh"
         script.parent.mkdir(parents=True)
         script.write_text("#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes")
-        matches, _ = scan_binary_strings(
-            tmp_path, ["/usr/bin/run.sh"], debug=False
-        )
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/run.sh"], debug=False)
         assert matches == []
 
     def test_multiple_binaries(self, tmp_path):
@@ -721,9 +748,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "app2",
             ["/sys/fs/cgroup/cpu/cpu.cfs_quota_us"],
         )
-        matches, _ = scan_binary_strings(
-            tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False
-        )
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
         assert len(matches) >= 2
         sources = {m.source for m in matches}
         assert "binary:/usr/bin/app1" in sources
@@ -734,9 +759,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _ = scan_binary_strings(
-            tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False
-        )
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False)
         pattern_count = sum(1 for m in matches if m.pattern == "memory.limit_in_bytes")
         assert pattern_count == 1
 
@@ -746,9 +769,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "local" / "bin" / "cgroup-reader",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _ = scan_binary_strings(
-            tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False
-        )
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False)
         assert len(matches) > 0
         assert matches[0].source == "binary:/usr/local/bin/cgroup-reader"
 
@@ -791,10 +812,13 @@ class TestRunDeepScanWithBinary:
 
     def test_script_entrypoint_not_double_scanned(self, tmp_path):
         """Shell script entrypoint should only produce high/medium matches, not low."""
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
-""")
+""",
+        )
         matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
@@ -826,10 +850,13 @@ exec "$@"
 
     def test_mixed_script_and_binary_args(self, tmp_path):
         """When entrypoint is a script and CMD has a binary, both are scanned."""
-        self._create_script(tmp_path / "wrapper.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "wrapper.sh",
+            """#!/bin/bash
 echo "starting"
 exec "$@"
-""")
+""",
+        )
         self._create_binary_with_strings(
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
@@ -875,10 +902,13 @@ class TestRunDeepScanInterpreterSkip:
         bash.parent.mkdir(parents=True)
         bash.write_bytes(b"\x7fELF" + b"\x00" * 1000)
 
-        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
 echo hello
 exec "$@"
-""")
+""",
+        )
         matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",

@@ -690,7 +690,8 @@ class TestDeepScanResult:
 
     def test_single_match(self):
         result = ImageAnalysisResult(
-            image_name="test", image_id="abc",
+            image_name="test",
+            image_id="abc",
             deep_scan_matches=[
                 DeepScanMatch(
                     source="/entrypoint.sh",
@@ -706,7 +707,8 @@ class TestDeepScanResult:
 
     def test_multiple_matches_pipe_separated(self):
         result = ImageAnalysisResult(
-            image_name="test", image_id="abc",
+            image_name="test",
+            image_id="abc",
             deep_scan_matches=[
                 DeepScanMatch("/entrypoint.sh", "memory.limit_in_bytes", "high"),
                 DeepScanMatch("/entrypoint.sh", "cpu.cfs_quota_us", "high"),
@@ -720,35 +722,52 @@ class TestDeepScanResult:
 
     def test_confidence_priority(self):
         """Highest confidence wins: high > medium > low."""
-        r1 = ImageAnalysisResult("t", "", deep_scan_matches=[
-            DeepScanMatch("bin", "p1", "low"),
-        ])
+        r1 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+            ],
+        )
         assert r1.deep_scan_confidence == "low"
 
-        r2 = ImageAnalysisResult("t", "", deep_scan_matches=[
-            DeepScanMatch("bin", "p1", "low"),
-            DeepScanMatch("script", "p2", "medium"),
-        ])
+        r2 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+                DeepScanMatch("script", "p2", "medium"),
+            ],
+        )
         assert r2.deep_scan_confidence == "medium"
 
-        r3 = ImageAnalysisResult("t", "", deep_scan_matches=[
-            DeepScanMatch("bin", "p1", "low"),
-            DeepScanMatch("script", "p2", "medium"),
-            DeepScanMatch("entry", "p3", "high"),
-        ])
+        r3 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+                DeepScanMatch("script", "p2", "medium"),
+                DeepScanMatch("entry", "p3", "high"),
+            ],
+        )
         assert r3.deep_scan_confidence == "high"
 
     def test_sources_deduplicated(self):
-        result = ImageAnalysisResult("t", "", deep_scan_matches=[
-            DeepScanMatch("/entry.sh", "p1", "high"),
-            DeepScanMatch("/entry.sh", "p2", "high"),
-            DeepScanMatch("/entry.sh", "p3", "high"),
-        ])
+        result = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "p1", "high"),
+                DeepScanMatch("/entry.sh", "p2", "high"),
+                DeepScanMatch("/entry.sh", "p3", "high"),
+            ],
+        )
         assert result.deep_scan_sources == "/entry.sh"
 
     def test_v2_aware_property(self):
         result = ImageAnalysisResult(
-            "t", "",
+            "t",
+            "",
             deep_scan_matches=[
                 DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
             ],
@@ -758,7 +777,8 @@ class TestDeepScanResult:
 
     def test_v2_aware_false(self):
         result = ImageAnalysisResult(
-            "t", "",
+            "t",
+            "",
             deep_scan_matches=[
                 DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
             ],

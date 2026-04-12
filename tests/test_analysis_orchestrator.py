@@ -656,7 +656,8 @@ class TestApplyResultsDeepScan:
     def test_deep_scan_fields_mapped(self):
         images = [{"image_name": "test:latest"}]
         result = ImageAnalysisResult(
-            image_name="test:latest", image_id="abc",
+            image_name="test:latest",
+            image_id="abc",
             deep_scan_matches=[
                 DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
             ],

@@ -141,12 +141,7 @@ _V2_PATTERN_STRINGS.sort(key=len, reverse=True)
 # Use negative lookbehind/lookahead to prevent matching v2 patterns
 # that are substrings of v1 patterns (e.g. "io.weight" inside "blkio.weight",
 # "memory.max" inside "memory.max_usage_in_bytes").
-CGROUPV2_REGEX = re.compile(
-    "|".join(
-        rf"(?<![a-z]){re.escape(p)}(?![a-z_])"
-        for p in _V2_PATTERN_STRINGS
-    )
-)
+CGROUPV2_REGEX = re.compile("|".join(rf"(?<![a-z]){re.escape(p)}(?![a-z_])" for p in _V2_PATTERN_STRINGS))
 
 
 def find_cgroupv2_patterns(text: str) -> list[str]:
@@ -183,18 +178,20 @@ _MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
 
 # Common interpreter paths to skip when collecting binaries for strings scan.
 # These appear in ENTRYPOINT/CMD but are never the application binary.
-_INTERPRETER_PATHS = frozenset({
-    "/bin/bash",
-    "/bin/sh",
-    "/bin/dash",
-    "/bin/zsh",
-    "/usr/bin/bash",
-    "/usr/bin/sh",
-    "/usr/bin/dash",
-    "/usr/bin/zsh",
-    "/usr/bin/env",
-    "/bin/env",
-})
+_INTERPRETER_PATHS = frozenset(
+    {
+        "/bin/bash",
+        "/bin/sh",
+        "/bin/dash",
+        "/bin/zsh",
+        "/usr/bin/bash",
+        "/usr/bin/sh",
+        "/usr/bin/dash",
+        "/usr/bin/zsh",
+        "/usr/bin/env",
+        "/bin/env",
+    }
+)
 
 
 def _is_shell_script(file_path: Path) -> bool:
@@ -408,11 +405,13 @@ def scan_binary_strings(
         if v1_patterns:
             source = f"binary:{binary_ref}"
             for pattern in v1_patterns:
-                matches.append(DeepScanMatch(
-                    source=source,
-                    pattern=pattern,
-                    confidence="low",
-                ))
+                matches.append(
+                    DeepScanMatch(
+                        source=source,
+                        pattern=pattern,
+                        confidence="low",
+                    )
+                )
             if debug:
                 print(f"      [DEBUG]   Found {len(v1_patterns)} cgroup v1 patterns in {binary_ref}")
 
@@ -496,11 +495,13 @@ def scan_entrypoint_scripts(
         v1_patterns = find_cgroupv1_patterns(content)
         if v1_patterns:
             for pattern in v1_patterns:
-                matches.append(DeepScanMatch(
-                    source=container_path,
-                    pattern=pattern,
-                    confidence=confidence,
-                ))
+                matches.append(
+                    DeepScanMatch(
+                        source=container_path,
+                        pattern=pattern,
+                        confidence=confidence,
+                    )
+                )
             if debug:
                 print(f"      [DEBUG]   Found {len(v1_patterns)} cgroup v1 patterns in {container_path}")
 

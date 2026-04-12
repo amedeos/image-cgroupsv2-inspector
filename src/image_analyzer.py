@@ -34,9 +34,9 @@ class BinaryInfo:
 class DeepScanMatch:
     """A single cgroup v1 heuristic match."""
 
-    source: str          # file where the match was found, e.g. "/entrypoint.sh"
-    pattern: str         # the cgroup v1 pattern matched, e.g. "memory.limit_in_bytes"
-    confidence: str      # "high", "medium", or "low"
+    source: str  # file where the match was found, e.g. "/entrypoint.sh"
+    pattern: str  # the cgroup v1 pattern matched, e.g. "memory.limit_in_bytes"
+    confidence: str  # "high", "medium", or "low"
 
 
 @dataclass
@@ -127,7 +127,7 @@ class ImageAnalysisResult:
     @property
     def deep_scan_match(self) -> str:
         """Return 'true' if any cgroup v1 pattern was found, 'false' otherwise, '' if not scanned."""
-        if not hasattr(self, 'deep_scan_matches') or self.deep_scan_matches is None:
+        if not hasattr(self, "deep_scan_matches") or self.deep_scan_matches is None:
             return ""
         return "true" if self.deep_scan_matches else "false"
 
@@ -1240,6 +1240,7 @@ class ImageAnalyzer:
                 print("    Running deep-scan for cgroup v1 references...")
                 entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
                 from .deep_scan import run_deep_scan
+
                 deep_matches, v2_aware = run_deep_scan(
                     extract_path=extract_path,
                     image_name=podman_image,
