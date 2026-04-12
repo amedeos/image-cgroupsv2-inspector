@@ -10,17 +10,16 @@ from src.deep_scan import (
     CGROUPV1_REGEX,
     CGROUPV2_FILE_NAMES,
     CGROUPV2_REGEX,
+    _extract_sourced_paths,
+    _is_elf_binary,
+    _is_shell_script,
+    _resolve_script_in_rootfs,
+    _run_strings,
     find_cgroupv1_patterns,
     find_cgroupv2_patterns,
     run_deep_scan,
-    scan_entrypoint_scripts,
-    _is_shell_script,
-    _resolve_script_in_rootfs,
-    _extract_sourced_paths,
-    _read_script_content,
-    _is_elf_binary,
-    _run_strings,
     scan_binary_strings,
+    scan_entrypoint_scripts,
 )
 
 
@@ -411,7 +410,7 @@ get_mem() {
     cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null
 }
 """)
-        matches, v2_aware = scan_entrypoint_scripts(
+        matches, _ = scan_entrypoint_scripts(
             tmp_path, ["/entrypoint.sh"], debug=False
         )
         assert len(matches) > 0
@@ -426,7 +425,7 @@ get_mem() {
 
     def test_non_path_entrypoint(self, tmp_path):
         """Bare command like 'python' without path should be skipped."""
-        matches, v2_aware = scan_entrypoint_scripts(
+        matches, _ = scan_entrypoint_scripts(
             tmp_path, ["python", "app.py"], debug=False
         )
         assert matches == []
@@ -436,7 +435,7 @@ get_mem() {
         binary = tmp_path / "usr" / "local" / "bin" / "myapp"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        matches, v2_aware = scan_entrypoint_scripts(
+        matches, _ = scan_entrypoint_scripts(
             tmp_path, ["/usr/local/bin/myapp"], debug=False
         )
         assert matches == []
@@ -499,7 +498,7 @@ get_memory_limit() {
     cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0"
 }
 """)
-        matches, v2_aware = scan_entrypoint_scripts(
+        matches, _ = scan_entrypoint_scripts(
             tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False
         )
         assert len(matches) > 0
@@ -521,7 +520,7 @@ get_memory_limit() {
         self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
 source /opt/level0.sh
 """)
-        matches, _ = scan_entrypoint_scripts(
+        _, _ = scan_entrypoint_scripts(
             tmp_path, ["/entrypoint.sh"], debug=False
         )
         # The chain is deeper than _MAX_SOURCE_DEPTH (5), so the deepest
@@ -699,7 +698,7 @@ class TestScanBinaryStrings:
         assert v2_aware is False
 
     def test_nonexistent_binary_skipped(self, tmp_path):
-        matches, v2_aware = scan_binary_strings(
+        matches, _ = scan_binary_strings(
             tmp_path, ["/usr/bin/nonexistent"], debug=False
         )
         assert matches == []
@@ -708,7 +707,7 @@ class TestScanBinaryStrings:
         script = tmp_path / "usr" / "bin" / "run.sh"
         script.parent.mkdir(parents=True)
         script.write_text("#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes")
-        matches, v2_aware = scan_binary_strings(
+        matches, _ = scan_binary_strings(
             tmp_path, ["/usr/bin/run.sh"], debug=False
         )
         assert matches == []
@@ -722,7 +721,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "app2",
             ["/sys/fs/cgroup/cpu/cpu.cfs_quota_us"],
         )
-        matches, v2_aware = scan_binary_strings(
+        matches, _ = scan_binary_strings(
             tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False
         )
         assert len(matches) >= 2
@@ -780,7 +779,7 @@ class TestRunDeepScanWithBinary:
                 "/sys/fs/cgroup/cpuacct/cpuacct.usage",
             ],
         )
-        matches, v2_aware = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="cadvisor:v0.44.0",
             entrypoint=["/usr/bin/cadvisor"],

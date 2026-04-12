@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Cgroup v1 controller paths (directories under /sys/fs/cgroup/)
 # These directories exist ONLY in cgroup v1 and NOT in unified cgroup v2.
