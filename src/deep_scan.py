@@ -174,6 +174,21 @@ _EXEC_PATTERN = re.compile(
 _MAX_SOURCE_DEPTH = 5
 _MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
 
+# Common interpreter paths to skip when collecting binaries for strings scan.
+# These appear in ENTRYPOINT/CMD but are never the application binary.
+_INTERPRETER_PATHS = frozenset({
+    "/bin/bash",
+    "/bin/sh",
+    "/bin/dash",
+    "/bin/zsh",
+    "/usr/bin/bash",
+    "/usr/bin/sh",
+    "/usr/bin/dash",
+    "/usr/bin/zsh",
+    "/usr/bin/env",
+    "/bin/env",
+})
+
 
 def _is_shell_script(file_path: Path) -> bool:
     """Check if a file is likely a shell script.
@@ -200,15 +215,33 @@ def _resolve_script_in_rootfs(
     """Resolve a script reference to an actual file in the extracted rootfs.
 
     Handles:
-    - Absolute paths: /usr/local/bin/entrypoint.sh → extract_path/usr/local/bin/entrypoint.sh
-    - Relative paths: ./helpers.sh → resolved relative to `relative_to` directory
-    - Paths with shell variable references like ${SCRIPT_DIR}/file.sh are resolved
-      by trying common expansions, but ultimately skipped if unresolvable.
+    - Absolute paths: /usr/local/bin/entrypoint.sh
+    - Relative paths: ./helpers.sh (resolved relative to `relative_to`)
+    - Shell variable paths: ${SCRIPT_DIR}/helpers.sh, $DIR/helpers.sh
+      → extracts the filename and tries relative resolution against
+        the directory of the sourcing script
 
     Returns:
         Resolved Path if the file exists and is readable, None otherwise.
     """
-    if "$" in script_ref and not script_ref.startswith("/"):
+    # Handle paths containing shell variables
+    if "$" in script_ref:
+        # Try to extract the filename portion after the last /
+        # e.g. "${SCRIPT_DIR}/cgroup-helpers.sh" → "cgroup-helpers.sh"
+        if "/" in script_ref:
+            filename = script_ref.rsplit("/", 1)[-1]
+            # If the filename itself contains a variable, give up
+            if "$" in filename:
+                return None
+            # Try to resolve the filename relative to the sourcing script's dir
+            if relative_to:
+                candidate = relative_to / filename
+                try:
+                    resolved = candidate.resolve()
+                    if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                        return resolved
+                except (OSError, ValueError):
+                    pass
         return None
 
     if script_ref.startswith("/"):
@@ -578,9 +611,15 @@ def run_deep_scan(
             v2_aware = True
 
     # Step 4: Binary strings scanning
+    # Scan entrypoint/cmd binaries that were NOT shell scripts
+    # Skip common interpreters (bash, sh, etc.) that are never the application
     binary_refs: list[str] = []
     for ref in combined:
         if "/" not in ref or ref.startswith("-"):
+            continue
+        if ref in _INTERPRETER_PATHS:
+            if debug:
+                print(f"      [DEBUG] Skipping interpreter binary: {ref}")
             continue
         resolved = _resolve_script_in_rootfs(ref, extract_path)
         if resolved is not None and not _is_shell_script(resolved) and _is_elf_binary(resolved):

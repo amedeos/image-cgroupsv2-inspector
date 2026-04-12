@@ -271,8 +271,54 @@ class TestResolveScriptInRootfs:
         result = _resolve_script_in_rootfs("/../../../etc/passwd", tmp_path)
         assert result is None
 
-    def test_shell_variable_skipped(self, tmp_path):
+    def test_shell_variable_no_relative_to_returns_none(self, tmp_path):
+        """Variable paths without relative_to cannot be resolved."""
         result = _resolve_script_in_rootfs("${HOME}/script.sh", tmp_path)
+        assert result is None
+
+    def test_variable_with_filename_resolved_relative(self, tmp_path):
+        """${SCRIPT_DIR}/helpers.sh should resolve filename relative to relative_to."""
+        parent = tmp_path / "opt" / "app"
+        parent.mkdir(parents=True)
+        helper = parent / "cgroup-helpers.sh"
+        helper.write_text("#!/bin/bash\nget_mem() { echo 1; }")
+        resolved = _resolve_script_in_rootfs(
+            "${SCRIPT_DIR}/cgroup-helpers.sh", tmp_path, relative_to=parent
+        )
+        assert resolved is not None
+        assert resolved.name == "cgroup-helpers.sh"
+
+    def test_variable_with_filename_no_relative_to(self, tmp_path):
+        """Without relative_to, variable paths cannot be resolved."""
+        result = _resolve_script_in_rootfs("${SCRIPT_DIR}/helpers.sh", tmp_path)
+        assert result is None
+
+    def test_variable_in_filename_skipped(self, tmp_path):
+        """If the filename itself contains a variable, give up."""
+        parent = tmp_path / "opt"
+        parent.mkdir(parents=True)
+        result = _resolve_script_in_rootfs("${DIR}/${FILE}", tmp_path, relative_to=parent)
+        assert result is None
+
+    def test_dollar_sign_path_resolved(self, tmp_path):
+        """$DIR/helpers.sh (no braces) should also resolve."""
+        parent = tmp_path / "opt" / "app"
+        parent.mkdir(parents=True)
+        helper = parent / "helpers.sh"
+        helper.write_text("#!/bin/bash\necho hi")
+        resolved = _resolve_script_in_rootfs(
+            "$DIR/helpers.sh", tmp_path, relative_to=parent
+        )
+        assert resolved is not None
+        assert resolved.name == "helpers.sh"
+
+    def test_variable_path_traversal_blocked(self, tmp_path):
+        """Variable-based path should still respect rootfs boundary."""
+        parent = tmp_path / "opt"
+        parent.mkdir(parents=True)
+        result = _resolve_script_in_rootfs(
+            "${DIR}/../../etc/passwd", tmp_path, relative_to=parent
+        )
         assert result is None
 
 
@@ -383,6 +429,28 @@ exec "$@"
         )
         assert matches == []
         assert v2_aware is False
+
+    def test_source_with_variable_path(self, tmp_path):
+        """source "${SCRIPT_DIR}/file.sh" pattern should be followed."""
+        self._create_script(tmp_path / "opt" / "app" / "entrypoint-source.sh", """#!/bin/bash
+SCRIPT_DIR=$(dirname "$0")
+source "${SCRIPT_DIR}/cgroup-helpers.sh"
+echo "Memory: $(get_memory_limit)"
+exec "$@"
+""")
+        self._create_script(tmp_path / "opt" / "app" / "cgroup-helpers.sh", """#!/bin/bash
+get_memory_limit() {
+    cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0"
+}
+""")
+        matches, v2_aware = scan_entrypoint_scripts(
+            tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False
+        )
+        assert len(matches) > 0
+        assert any("memory.limit_in_bytes" in m.pattern for m in matches)
+        sourced_matches = [m for m in matches if "cgroup-helpers" in m.source]
+        assert len(sourced_matches) > 0
+        assert all(m.confidence == "medium" for m in sourced_matches)
 
     def test_depth_limit(self, tmp_path):
         """Source chains deeper than _MAX_SOURCE_DEPTH are truncated."""
@@ -736,3 +804,31 @@ exec "$@"
         )
         assert matches == []
         assert v2_aware is False
+
+
+class TestRunDeepScanInterpreterSkip:
+    """Test that common interpreters are skipped in binary scanning."""
+
+    def _create_script(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o755)
+
+    def test_bash_not_scanned_with_strings(self, tmp_path):
+        """CMD ['/bin/bash', '-c', '...'] should not trigger strings on /bin/bash."""
+        bash = tmp_path / "bin" / "bash"
+        bash.parent.mkdir(parents=True)
+        bash.write_bytes(b"\x7fELF" + b"\x00" * 1000)
+
+        self._create_script(tmp_path / "entrypoint.sh", """#!/bin/bash
+echo hello
+exec "$@"
+""")
+        matches, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            cmd=["/bin/bash", "-c", "echo running"],
+            debug=False,
+        )
+        assert not any("binary:/bin/bash" in m.source for m in matches)
