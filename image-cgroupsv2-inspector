@@ -488,7 +488,7 @@ def main() -> int:
     # Run system checks (podman, etc.)
     if log_to_file:
         logger.info("Running system checks...")
-    if not run_system_checks(verbose=args.verbose):
+    if not run_system_checks(verbose=args.verbose, deep_scan=args.deep_scan):
         print("\n✗ System checks failed. Please install the required dependencies.")
         if log_to_file:
             logger.error("System checks failed")
