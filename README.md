@@ -625,7 +625,7 @@ When the deep-scan finds cgroup v1 patterns in a file that **also** contains cgr
 | `false` | (empty) | No cgroup v1 references found — image is fine |
 | `true` | `true` | v1 references found but image handles both v1 and v2 — likely safe |
 | `true` | `false` | v1 references found with no v2 fallback — **investigate and remediate** |
-| `false` | (empty) | (has go_cgroup_libs) | No direct v1 patterns but binary uses cgroup libraries — investigate |
+| `false` | (empty) | No direct v1 patterns but binary uses Go cgroup libraries — investigate |
 
 #### Source Chain Following
 
