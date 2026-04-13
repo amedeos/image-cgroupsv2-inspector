@@ -15,7 +15,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-STATE_VERSION = 3
+STATE_VERSION = 4
 
 ANALYSIS_KEYS = (
     "java_binary",
@@ -27,12 +27,12 @@ ANALYSIS_KEYS = (
     "dotnet_binary",
     "dotnet_version",
     "dotnet_cgroup_v2_compatible",
-    "analysis_error",
     "deep_scan_match",
     "deep_scan_confidence",
     "deep_scan_sources",
     "deep_scan_patterns",
     "deep_scan_v2_aware",
+    "analysis_error",
 )
 
 

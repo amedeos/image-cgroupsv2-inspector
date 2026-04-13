@@ -719,12 +719,12 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `dotnet_binary` | Path to .NET binary found (or "None") |
 | `dotnet_version` | .NET version detected |
 | `dotnet_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
-| `analysis_error` | Error message if analysis failed |
 | `deep_scan_match` | `"true"` if cgroup v1 patterns found, `"false"` if scanned with no matches, empty if not scanned |
 | `deep_scan_confidence` | Highest confidence level: `"high"`, `"medium"`, or `"low"` (empty if no match) |
 | `deep_scan_sources` | Pipe-separated file paths where matches were found (e.g., `/entrypoint.sh\|/opt/helpers.sh` or `binary:/usr/bin/cadvisor`) |
 | `deep_scan_patterns` | Pipe-separated cgroup v1 patterns matched (e.g., `memory.limit_in_bytes\|cpu.cfs_quota_us`) |
 | `deep_scan_v2_aware` | `"true"` if matched files also contain cgroup v2 patterns, `"false"` if v1-only, empty if no match |
+| `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images
 
