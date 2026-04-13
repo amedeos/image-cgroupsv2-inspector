@@ -17,8 +17,10 @@ class TestCheckStringsInstalled:
         mock_result.stdout = "GNU strings version 2.40\n"
         mock_result.stderr = ""
 
-        with patch("src.system_checks.shutil.which", return_value="/usr/bin/strings"), \
-             patch("src.system_checks.subprocess.run", return_value=mock_result):
+        with (
+            patch("src.system_checks.shutil.which", return_value="/usr/bin/strings"),
+            patch("src.system_checks.subprocess.run", return_value=mock_result),
+        ):
             ok, msg = check_strings_installed()
             assert ok is True
             assert "strings is installed" in msg
@@ -35,8 +37,10 @@ class TestCheckStringsInstalled:
         mock_result.stdout = ""
         mock_result.stderr = "some error"
 
-        with patch("src.system_checks.shutil.which", return_value="/usr/bin/strings"), \
-             patch("src.system_checks.subprocess.run", return_value=mock_result):
+        with (
+            patch("src.system_checks.shutil.which", return_value="/usr/bin/strings"),
+            patch("src.system_checks.subprocess.run", return_value=mock_result),
+        ):
             ok, msg = check_strings_installed()
             assert ok is False
             assert "failed to get version" in msg
@@ -52,26 +56,34 @@ class TestRunSystemChecks:
     """Tests for run_system_checks() with the deep_scan parameter."""
 
     def test_deep_scan_false_does_not_check_strings(self):
-        with patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")), \
-             patch("src.system_checks.check_strings_installed") as mock_strings:
+        with (
+            patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")),
+            patch("src.system_checks.check_strings_installed") as mock_strings,
+        ):
             result = run_system_checks(deep_scan=False)
             assert result is True
             mock_strings.assert_not_called()
 
     def test_deep_scan_true_checks_strings(self):
-        with patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")), \
-             patch("src.system_checks.check_strings_installed", return_value=(True, "strings ok")):
+        with (
+            patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")),
+            patch("src.system_checks.check_strings_installed", return_value=(True, "strings ok")),
+        ):
             result = run_system_checks(deep_scan=True)
             assert result is True
 
     def test_deep_scan_true_strings_missing_fails(self):
-        with patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")), \
-             patch("src.system_checks.check_strings_installed", return_value=(False, "not found")):
+        with (
+            patch("src.system_checks.check_podman_installed", return_value=(True, "podman ok")),
+            patch("src.system_checks.check_strings_installed", return_value=(False, "not found")),
+        ):
             result = run_system_checks(deep_scan=True)
             assert result is False
 
     def test_podman_missing_still_fails_with_deep_scan(self):
-        with patch("src.system_checks.check_podman_installed", return_value=(False, "not found")), \
-             patch("src.system_checks.check_strings_installed", return_value=(True, "strings ok")):
+        with (
+            patch("src.system_checks.check_podman_installed", return_value=(False, "not found")),
+            patch("src.system_checks.check_strings_installed", return_value=(True, "strings ok")),
+        ):
             result = run_system_checks(deep_scan=True)
             assert result is False
