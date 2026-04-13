@@ -442,12 +442,13 @@ def scan_entrypoint_scripts(
     extract_path: Path,
     entrypoint_cmd: list[str],
     debug: bool = False,
-) -> tuple[list, bool]:
+) -> tuple[list, bool, list[str]]:
     """Scan entrypoint/CMD scripts for cgroup v1 references.
 
     Resolves the entrypoint to a file in the extracted rootfs, scans it
     for cgroup v1 patterns, then follows source/exec chains to scan
-    referenced scripts.
+    referenced scripts. ELF binaries discovered via exec chains are
+    collected and returned for separate strings scanning.
 
     Args:
         extract_path: Path to the extracted container rootfs.
@@ -456,15 +457,18 @@ def scan_entrypoint_scripts(
         debug: Enable debug output.
 
     Returns:
-        Tuple of (matches, v2_aware):
+        Tuple of (matches, v2_aware, discovered_binaries):
         - matches: list of DeepScanMatch objects
         - v2_aware: True if ANY scanned file contains both v1 AND v2 patterns
+        - discovered_binaries: list of container paths to ELF binaries
+          found via exec chains (to be scanned with strings)
     """
     from .image_analyzer import DeepScanMatch
 
     matches: list[DeepScanMatch] = []
     v2_aware = False
     scanned_files: set[str] = set()
+    discovered_binaries: list[str] = []
 
     def _scan_script(
         file_path: Path,
@@ -518,7 +522,10 @@ def scan_entrypoint_scripts(
                 extract_path,
                 relative_to=file_path.parent,
             )
-            if resolved and _is_shell_script(resolved):
+            if resolved is None:
+                continue
+
+            if _is_shell_script(resolved):
                 try:
                     rel = resolved.relative_to(extract_path.resolve())
                     sourced_container_path = f"/{rel}"
@@ -531,11 +538,22 @@ def scan_entrypoint_scripts(
                     confidence="medium",
                     depth=depth + 1,
                 )
+            elif _is_elf_binary(resolved):
+                try:
+                    rel = resolved.relative_to(extract_path.resolve())
+                    binary_container_path = f"/{rel}"
+                except ValueError:
+                    binary_container_path = sourced_ref
+
+                if binary_container_path not in _INTERPRETER_PATHS:
+                    discovered_binaries.append(binary_container_path)
+                    if debug:
+                        print(f"      [DEBUG]   Discovered ELF binary via exec chain: {binary_container_path}")
 
     if not entrypoint_cmd:
         if debug:
             print("      [DEBUG] No entrypoint/cmd to scan")
-        return matches, v2_aware
+        return matches, v2_aware, discovered_binaries
 
     entrypoint_ref = entrypoint_cmd[0]
 
@@ -546,18 +564,18 @@ def scan_entrypoint_scripts(
     if "/" not in entrypoint_ref:
         if debug:
             print(f"      [DEBUG] Skipping non-path entrypoint: {entrypoint_ref}")
-        return matches, v2_aware
+        return matches, v2_aware, discovered_binaries
 
     resolved = _resolve_script_in_rootfs(entrypoint_ref, extract_path)
     if resolved is None:
         if debug:
             print(f"      [DEBUG] Could not resolve entrypoint in rootfs: {entrypoint_ref}")
-        return matches, v2_aware
+        return matches, v2_aware, discovered_binaries
 
     if not _is_shell_script(resolved):
         if debug:
             print(f"      [DEBUG] Entrypoint is not a shell script: {entrypoint_ref}")
-        return matches, v2_aware
+        return matches, v2_aware, discovered_binaries
 
     _scan_script(resolved, entrypoint_ref, confidence="high", depth=0)
 
@@ -567,7 +585,7 @@ def scan_entrypoint_scripts(
             if arg_resolved and _is_shell_script(arg_resolved) and str(arg_resolved.resolve()) not in scanned_files:
                 _scan_script(arg_resolved, arg, confidence="high", depth=0)
 
-    return matches, v2_aware
+    return matches, v2_aware, discovered_binaries
 
 
 def run_deep_scan(
@@ -608,8 +626,9 @@ def run_deep_scan(
         combined.extend(cmd)
 
     # Step 3: Entrypoint script scanning
+    exec_discovered_binaries: list[str] = []
     if combined:
-        script_matches, scripts_v2_aware = scan_entrypoint_scripts(
+        script_matches, scripts_v2_aware, exec_discovered_binaries = scan_entrypoint_scripts(
             extract_path=extract_path,
             entrypoint_cmd=combined,
             debug=debug,
@@ -619,7 +638,9 @@ def run_deep_scan(
             v2_aware = True
 
     # Step 4: Binary strings scanning
-    # Scan entrypoint/cmd binaries that were NOT shell scripts
+    # Scan binaries from two sources:
+    # 1. ENTRYPOINT/CMD arguments that are ELF binaries (not shell scripts)
+    # 2. ELF binaries discovered via exec chains in entrypoint scripts
     # Skip common interpreters (bash, sh, etc.) that are never the application
     binary_refs: list[str] = []
     for ref in combined:
@@ -631,6 +652,10 @@ def run_deep_scan(
             continue
         resolved = _resolve_script_in_rootfs(ref, extract_path)
         if resolved is not None and not _is_shell_script(resolved) and _is_elf_binary(resolved):
+            binary_refs.append(ref)
+
+    for ref in exec_discovered_binaries:
+        if ref not in binary_refs:
             binary_refs.append(ref)
 
     if binary_refs:

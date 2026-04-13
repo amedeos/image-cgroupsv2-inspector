@@ -391,7 +391,7 @@ MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)
 exec "$@"
 """,
         )
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, v2_aware, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert any(m.pattern == "memory.limit_in_bytes" for m in matches)
         assert all(m.confidence == "high" for m in matches)
@@ -409,7 +409,7 @@ fi
 exec "$@"
 """,
         )
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, v2_aware, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
@@ -430,20 +430,21 @@ get_mem() {
 }
 """,
         )
-        matches, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         sourced_matches = [m for m in matches if "helpers" in m.source]
         assert len(sourced_matches) > 0
         assert all(m.confidence == "medium" for m in sourced_matches)
 
     def test_no_entrypoint(self, tmp_path):
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, [], debug=False)
+        matches, v2_aware, discovered = scan_entrypoint_scripts(tmp_path, [], debug=False)
         assert matches == []
         assert v2_aware is False
+        assert discovered == []
 
     def test_non_path_entrypoint(self, tmp_path):
         """Bare command like 'python' without path should be skipped."""
-        matches, _ = scan_entrypoint_scripts(tmp_path, ["python", "app.py"], debug=False)
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["python", "app.py"], debug=False)
         assert matches == []
 
     def test_binary_entrypoint_skipped(self, tmp_path):
@@ -451,7 +452,7 @@ get_mem() {
         binary = tmp_path / "usr" / "local" / "bin" / "myapp"
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        matches, _ = scan_entrypoint_scripts(tmp_path, ["/usr/local/bin/myapp"], debug=False)
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["/usr/local/bin/myapp"], debug=False)
         assert matches == []
 
     def test_v2_aware_in_sourced_file(self, tmp_path):
@@ -473,7 +474,7 @@ else
 fi
 """,
         )
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, v2_aware, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
@@ -486,7 +487,7 @@ echo "Hello world"
 exec "$@"
 """,
         )
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, v2_aware, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert matches == []
         assert v2_aware is False
 
@@ -501,7 +502,7 @@ BLKIO=$(cat /sys/fs/cgroup/blkio/blkio.weight 2>/dev/null)
 exec "$@"
 """,
         )
-        matches, v2_aware = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        matches, v2_aware, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         assert len(matches) > 0
         assert v2_aware is False
 
@@ -524,7 +525,7 @@ get_memory_limit() {
 }
 """,
         )
-        matches, _ = scan_entrypoint_scripts(tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False)
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["/opt/app/entrypoint-source.sh"], debug=False)
         assert len(matches) > 0
         assert any("memory.limit_in_bytes" in m.pattern for m in matches)
         sourced_matches = [m for m in matches if "cgroup-helpers" in m.source]
@@ -550,9 +551,98 @@ get_memory_limit() {
 source /opt/level0.sh
 """,
         )
-        _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        _, _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
         # The chain is deeper than _MAX_SOURCE_DEPTH (5), so the deepest
         # script with v1 refs may or may not be reached depending on depth
+
+    def test_exec_chain_discovers_elf_binary(self, tmp_path):
+        """exec /path/to/binary in entrypoint should be collected for strings scanning."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+echo "starting"
+exec /usr/local/bin/myapp --flag
+""",
+        )
+        binary = tmp_path / "usr" / "local" / "bin" / "myapp"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        _, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert "/usr/local/bin/myapp" in discovered
+
+    def test_exec_chain_skips_interpreters(self, tmp_path):
+        """exec /bin/bash should NOT be collected as a discovered binary."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+exec /bin/bash /some/script.sh
+""",
+        )
+        bash = tmp_path / "bin" / "bash"
+        bash.parent.mkdir(parents=True)
+        bash.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        _, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert "/bin/bash" not in discovered
+
+    def test_exec_chain_does_not_duplicate_shell_scripts(self, tmp_path):
+        """exec of a shell script should be followed as script, not collected as binary."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+exec /opt/run.sh
+""",
+        )
+        self._create_script(
+            tmp_path / "opt" / "run.sh",
+            """#!/bin/bash
+cat /sys/fs/cgroup/memory/memory.limit_in_bytes
+""",
+        )
+        matches, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert len(discovered) == 0
+        assert len(matches) > 0
+        assert any(m.confidence == "medium" for m in matches)
+
+    def test_exec_chain_binary_no_entrypoint_match(self, tmp_path):
+        """Entrypoint has no v1 patterns, but exec'd binary should be discovered."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+echo "setup complete"
+exec /usr/bin/monitor
+""",
+        )
+        binary = tmp_path / "usr" / "bin" / "monitor"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        matches, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert matches == []
+        assert "/usr/bin/monitor" in discovered
+
+    def test_source_chain_then_exec_binary(self, tmp_path):
+        """Entrypoint sources a script which exec's a binary — binary should be discovered."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+source /opt/setup.sh
+""",
+        )
+        self._create_script(
+            tmp_path / "opt" / "setup.sh",
+            """#!/bin/bash
+echo "configuring"
+exec /usr/local/bin/app
+""",
+        )
+        binary = tmp_path / "usr" / "local" / "bin" / "app"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        _, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert "/usr/local/bin/app" in discovered
 
 
 class TestRunDeepScan:
@@ -886,6 +976,55 @@ exec "$@"
         )
         assert matches == []
         assert v2_aware is False
+
+    def test_exec_chain_binary_scanned_with_strings(self, tmp_path):
+        """Binary discovered via exec chain should be scanned with strings."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+echo "starting"
+exec /usr/local/bin/myapp
+""",
+        )
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "local" / "bin" / "myapp",
+            [
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
+            ],
+        )
+        matches, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert all("binary:" in m.source for m in matches)
+        assert all(m.confidence == "low" for m in matches)
+        assert any("memory.limit_in_bytes" in m.pattern for m in matches)
+
+    def test_exec_chain_binary_not_duplicated(self, tmp_path):
+        """If binary is both in CMD and discovered via exec, scan it only once."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            """#!/bin/bash
+exec /usr/local/bin/myapp
+""",
+        )
+        self._create_binary_with_strings(
+            tmp_path / "usr" / "local" / "bin" / "myapp",
+            ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
+        )
+        matches, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            cmd=["/usr/local/bin/myapp"],
+            debug=False,
+        )
+        binary_sources = {m.source for m in matches}
+        assert len(binary_sources) == 1
 
 
 class TestRunDeepScanInterpreterSkip:
