@@ -162,6 +162,58 @@ def find_cgroupv2_patterns(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Known Go packages that interact with cgroups.
+# If these import paths appear in the `strings` output of a static Go binary,
+# the binary likely reads or manipulates cgroup files at runtime.
+# ---------------------------------------------------------------------------
+GO_CGROUP_PACKAGES = (
+    # Low-level cgroup libraries
+    "github.com/opencontainers/runc/libcontainer/cgroups",
+    "github.com/containerd/cgroups",
+    "github.com/opencontainers/cgroups",
+    # Metrics/monitoring libraries that read cgroup stats
+    "github.com/prometheus/procfs",
+    "github.com/google/cadvisor/container",
+    "github.com/google/cadvisor/cgroup",
+    # Go runtime cgroup awareness (embedded in all recent Go binaries,
+    # but these specific sub-paths indicate direct cgroup interaction)
+    "runtime/cgroup",
+    # Container runtime libraries
+    "github.com/docker/docker/daemon/stats",
+    "github.com/containers/podman",
+    # Kubernetes cgroup management
+    "k8s.io/kubernetes/pkg/kubelet/cm",
+    "k8s.io/kubernetes/pkg/kubelet/stats",
+    # Auto-tuning libraries that read cgroups for GOMAXPROCS/memory
+    "go.uber.org/automaxprocs",
+    "github.com/KimMachineGun/automemlimit",
+)
+
+# Build a regex for efficient matching of Go package paths.
+# These are always preceded by a path separator or start of line in strings output.
+_GO_PKG_STRINGS = list(GO_CGROUP_PACKAGES)
+_GO_PKG_STRINGS.sort(key=len, reverse=True)
+GO_CGROUP_REGEX = re.compile("|".join(re.escape(p) for p in _GO_PKG_STRINGS))
+
+
+def find_go_cgroup_deps(text: str) -> list[str]:
+    """Return de-duplicated Go cgroup package paths found in *text*.
+
+    Args:
+        text: Output from `strings` command on a Go binary.
+
+    Returns:
+        List of unique matched Go package paths, in order of first occurrence.
+    """
+    seen: dict[str, None] = {}
+    for match in GO_CGROUP_REGEX.finditer(text):
+        pkg = match.group(0)
+        if pkg not in seen:
+            seen[pkg] = None
+    return list(seen)
+
+
+# ---------------------------------------------------------------------------
 # Patterns for detecting sourced/executed scripts in shell scripts
 # ---------------------------------------------------------------------------
 _SOURCE_PATTERN = re.compile(
@@ -347,15 +399,16 @@ def scan_binary_strings(
     extract_path: Path,
     binary_refs: list[str],
     debug: bool = False,
-) -> tuple[list, bool]:
+) -> tuple[list, bool, list[str]]:
     """Scan binary files via `strings` for cgroup v1 references.
 
     For each binary reference:
     1. Resolve it in the extracted rootfs
     2. Verify it's an ELF binary
     3. Run `strings` on it
-    4. Check the output for cgroup v1 patterns
-    5. Check for cgroup v2 patterns (v2-awareness)
+    4. Check the output for Go cgroup library imports
+    5. Check the output for cgroup v1 patterns
+    6. Check for cgroup v2 patterns (v2-awareness)
 
     Args:
         extract_path: Path to the extracted container rootfs.
@@ -363,15 +416,17 @@ def scan_binary_strings(
         debug: Enable debug output.
 
     Returns:
-        Tuple of (matches, v2_aware):
+        Tuple of (matches, v2_aware, go_cgroup_libs):
         - matches: list of DeepScanMatch objects with confidence="low"
         - v2_aware: True if any binary contains both v1 and v2 patterns
+        - go_cgroup_libs: list of detected Go cgroup package paths
     """
     from .image_analyzer import DeepScanMatch
 
     matches: list[DeepScanMatch] = []
     v2_aware = False
     scanned_binaries: set[str] = set()
+    all_go_deps: list[str] = []
 
     for binary_ref in binary_refs:
         resolved = _resolve_script_in_rootfs(binary_ref, extract_path)
@@ -401,6 +456,13 @@ def scan_binary_strings(
         if strings_output is None:
             continue
 
+        # Check for Go cgroup library imports
+        go_deps = find_go_cgroup_deps(strings_output)
+        if go_deps:
+            all_go_deps.extend(dep for dep in go_deps if dep not in all_go_deps)
+            if debug:
+                print(f"      [DEBUG]   Found {len(go_deps)} Go cgroup libraries: {', '.join(go_deps)}")
+
         v1_patterns = find_cgroupv1_patterns(strings_output)
         if v1_patterns:
             source = f"binary:{binary_ref}"
@@ -423,7 +485,7 @@ def scan_binary_strings(
         elif debug:
             print(f"      [DEBUG]   No cgroup v1 patterns found in {binary_ref}")
 
-    return matches, v2_aware
+    return matches, v2_aware, all_go_deps
 
 
 def _extract_sourced_paths(content: str) -> list[str]:
@@ -594,7 +656,7 @@ def run_deep_scan(
     entrypoint: list[str] | None = None,
     cmd: list[str] | None = None,
     debug: bool = False,
-) -> tuple[list, bool]:
+) -> tuple[list, bool, list[str]]:
     """Run all deep-scan heuristics on an extracted container rootfs.
 
     Args:
@@ -605,9 +667,10 @@ def run_deep_scan(
         debug: Enable debug output.
 
     Returns:
-        Tuple of (matches, v2_aware):
+        Tuple of (matches, v2_aware, go_cgroup_libs):
         - matches: list of DeepScanMatch objects
         - v2_aware: True if any scanned source has both v1 and v2 patterns
+        - go_cgroup_libs: list of detected Go cgroup package paths
     """
     if debug:
         print(f"      [DEBUG] Deep scan enabled for {image_name}")
@@ -618,6 +681,7 @@ def run_deep_scan(
 
     all_matches: list = []
     v2_aware = False
+    all_go_libs: list[str] = []
 
     combined: list[str] = []
     if entrypoint:
@@ -661,7 +725,7 @@ def run_deep_scan(
     if binary_refs:
         if debug:
             print(f"      [DEBUG] Binary refs to scan with strings: {binary_refs}")
-        binary_matches, binary_v2_aware = scan_binary_strings(
+        binary_matches, binary_v2_aware, go_libs = scan_binary_strings(
             extract_path=extract_path,
             binary_refs=binary_refs,
             debug=debug,
@@ -669,5 +733,6 @@ def run_deep_scan(
         all_matches.extend(binary_matches)
         if binary_v2_aware:
             v2_aware = True
+        all_go_libs.extend(lib for lib in go_libs if lib not in all_go_libs)
 
-    return all_matches, v2_aware
+    return all_matches, v2_aware, all_go_libs

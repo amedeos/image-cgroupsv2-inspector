@@ -789,3 +789,18 @@ class TestDeepScanResult:
     def test_v2_aware_empty_when_no_matches(self):
         result = ImageAnalysisResult("t", "")
         assert result.deep_scan_v2_aware == ""
+
+    def test_go_cgroup_libs_property(self):
+        result = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_go_cgroup_libs_list=[
+                "github.com/prometheus/procfs",
+                "github.com/containerd/cgroups",
+            ],
+        )
+        assert result.deep_scan_go_cgroup_libs == "github.com/prometheus/procfs|github.com/containerd/cgroups"
+
+    def test_go_cgroup_libs_empty(self):
+        result = ImageAnalysisResult("t", "")
+        assert result.deep_scan_go_cgroup_libs == ""

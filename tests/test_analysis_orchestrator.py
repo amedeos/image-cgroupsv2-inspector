@@ -670,6 +670,7 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_sources"] == "/entry.sh"
         assert images[0]["deep_scan_patterns"] == "memory.limit_in_bytes"
         assert images[0]["deep_scan_v2_aware"] == "false"
+        assert images[0]["deep_scan_go_cgroup_libs"] == ""
 
     def test_deep_scan_fields_empty_when_no_matches(self):
         images = [{"image_name": "test:latest"}]
@@ -681,3 +682,15 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_sources"] == ""
         assert images[0]["deep_scan_patterns"] == ""
         assert images[0]["deep_scan_v2_aware"] == ""
+        assert images[0]["deep_scan_go_cgroup_libs"] == ""
+
+    def test_deep_scan_go_libs_mapped(self):
+        images = [{"image_name": "test:latest"}]
+        result = ImageAnalysisResult(
+            image_name="test:latest",
+            image_id="abc",
+            deep_scan_go_cgroup_libs_list=["github.com/prometheus/procfs"],
+        )
+        cache = {"test:latest": result}
+        AnalysisOrchestrator._apply_results(images, cache)
+        assert images[0]["deep_scan_go_cgroup_libs"] == "github.com/prometheus/procfs"

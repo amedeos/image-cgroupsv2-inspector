@@ -625,6 +625,7 @@ When the deep-scan finds cgroup v1 patterns in a file that **also** contains cgr
 | `false` | (empty) | No cgroup v1 references found — image is fine |
 | `true` | `true` | v1 references found but image handles both v1 and v2 — likely safe |
 | `true` | `false` | v1 references found with no v2 fallback — **investigate and remediate** |
+| `false` | (empty) | (has go_cgroup_libs) | No direct v1 patterns but binary uses cgroup libraries — investigate |
 
 #### Source Chain Following
 
@@ -638,6 +639,19 @@ source "${SCRIPT_DIR}/cgroup-helpers.sh"
 Shell variable paths like `${SCRIPT_DIR}/file.sh` are resolved by extracting the filename and looking for it relative to the sourcing script's directory.
 
 Limits: maximum source-chain depth of 5, maximum script size of 1 MB, symlinks that escape the rootfs are blocked.
+
+#### Go Cgroup Library Detection
+
+Go binaries compiled with static linking embed the full import paths of all dependencies. The deep-scan checks for known Go packages that interact with cgroups:
+
+- `github.com/opencontainers/runc/libcontainer/cgroups` — low-level cgroup management
+- `github.com/containerd/cgroups` — containerd cgroup library
+- `github.com/prometheus/procfs` — Prometheus metrics from procfs/cgroupfs
+- `github.com/google/cadvisor/container` — cAdvisor container stats
+- `go.uber.org/automaxprocs` — auto-tuning GOMAXPROCS from cgroup CPU limits
+- `github.com/KimMachineGun/automemlimit` — auto-tuning memory limits from cgroups
+
+These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informational signal. Finding a library does **not** set `deep_scan_match=true` — the library might be used in v2-compatible mode. The column helps operators identify binaries that likely interact with cgroups even when no direct v1 path patterns were found.
 
 #### Deep Scan Example
 
@@ -724,6 +738,7 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `deep_scan_sources` | Pipe-separated file paths where matches were found (e.g., `/entrypoint.sh\|/opt/helpers.sh` or `binary:/usr/bin/cadvisor`) |
 | `deep_scan_patterns` | Pipe-separated cgroup v1 patterns matched (e.g., `memory.limit_in_bytes\|cpu.cfs_quota_us`) |
 | `deep_scan_v2_aware` | `"true"` if matched files also contain cgroup v2 patterns, `"false"` if v1-only, empty if no match |
+| `deep_scan_go_cgroup_libs` | Pipe-separated Go package paths that interact with cgroups (e.g., `github.com/prometheus/procfs\|github.com/containerd/cgroups`). Informational — these libraries may use v1 or v2 |
 | `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images

@@ -15,7 +15,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-STATE_VERSION = 4
+STATE_VERSION = 5
 
 ANALYSIS_KEYS = (
     "java_binary",
@@ -32,6 +32,7 @@ ANALYSIS_KEYS = (
     "deep_scan_sources",
     "deep_scan_patterns",
     "deep_scan_v2_aware",
+    "deep_scan_go_cgroup_libs",
     "analysis_error",
 )
 

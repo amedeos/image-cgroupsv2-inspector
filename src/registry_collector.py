@@ -38,6 +38,7 @@ CSV_COLUMNS = [
     "deep_scan_sources",
     "deep_scan_patterns",
     "deep_scan_v2_aware",
+    "deep_scan_go_cgroup_libs",
     "analysis_error",
 ]
 

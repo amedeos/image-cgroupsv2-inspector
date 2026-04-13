@@ -50,6 +50,7 @@ class ImageAnalysisResult:
     dotnet_binaries: list[BinaryInfo] = field(default_factory=list)
     deep_scan_matches: list[DeepScanMatch] = field(default_factory=list)
     deep_scan_v2_aware_flag: bool = False
+    deep_scan_go_cgroup_libs_list: list[str] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -171,6 +172,16 @@ class ImageAnalysisResult:
         if not self.deep_scan_matches:
             return ""
         return "true" if self.deep_scan_v2_aware_flag else "false"
+
+    @property
+    def deep_scan_go_cgroup_libs(self) -> str:
+        """Return pipe-separated Go cgroup library paths detected in binaries.
+
+        Empty string if no deep scan was performed or no libraries detected.
+        """
+        if not self.deep_scan_go_cgroup_libs_list:
+            return ""
+        return "|".join(self.deep_scan_go_cgroup_libs_list)
 
 
 class ImageAnalyzer:
@@ -1241,7 +1252,7 @@ class ImageAnalyzer:
                 entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
                 from .deep_scan import run_deep_scan
 
-                deep_matches, v2_aware = run_deep_scan(
+                deep_matches, v2_aware, go_libs = run_deep_scan(
                     extract_path=extract_path,
                     image_name=podman_image,
                     entrypoint=entrypoint,
@@ -1250,6 +1261,7 @@ class ImageAnalyzer:
                 )
                 result.deep_scan_matches = deep_matches
                 result.deep_scan_v2_aware_flag = v2_aware
+                result.deep_scan_go_cgroup_libs_list = go_libs
 
             # Report findings
             if result.java_binaries:
@@ -1275,8 +1287,12 @@ class ImageAnalyzer:
                     src_matches = [m for m in result.deep_scan_matches if m.source == src]
                     patterns_str = ", ".join(dict.fromkeys(m.pattern for m in src_matches))
                     print(f"        [{src_matches[0].confidence}] {src}: {patterns_str}")
+                if result.deep_scan_go_cgroup_libs_list:
+                    print(f"      📦 Go cgroup libraries: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
             elif self.deep_scan:
                 print("      ✓ Deep-scan: no cgroup v1 references found")
+                if result.deep_scan_go_cgroup_libs_list:
+                    print(f"      📦 Go cgroup libraries detected: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
                 print("      No Java, Node.js, or .NET binaries found")
