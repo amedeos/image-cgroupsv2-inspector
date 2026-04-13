@@ -1,0 +1,13 @@
+FROM docker.io/library/golang:1.22-alpine AS builder
+WORKDIR /src
+COPY go.mod .
+COPY main.go .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /cgroup-reader main.go
+
+FROM registry.access.redhat.com/ubi9-minimal:latest
+RUN microdnf install -y bash && microdnf clean all
+COPY --from=builder /cgroup-reader /usr/local/bin/cgroup-reader
+COPY entrypoint-exec.sh /usr/local/bin/entrypoint-exec.sh
+RUN chmod +x /usr/local/bin/entrypoint-exec.sh /usr/local/bin/cgroup-reader
+ENTRYPOINT ["/usr/local/bin/entrypoint-exec.sh"]
+CMD ["--help"]

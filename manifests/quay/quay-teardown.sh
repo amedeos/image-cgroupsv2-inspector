@@ -65,6 +65,7 @@ TEST_REPOS=(
     deep-scan-entrypoint-cgv1
     deep-scan-source-cgv1
     deep-scan-binary-cgv1
+    deep-scan-exec-cgv1
     deep-scan-cadvisor
     deep-scan-node-exporter
     deep-scan-nginx-negative

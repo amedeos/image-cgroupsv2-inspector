@@ -891,6 +891,7 @@ The setup script also builds and pushes **deep-scan test images** for heuristic 
 | `deep-scan-entrypoint-cgv1` | Custom build | Entrypoint with cgroup v1 paths (expects: high confidence match) |
 | `deep-scan-source-cgv1` | Custom build | Sourced script with cgroup v1 paths (expects: medium confidence match) |
 | `deep-scan-binary-cgv1` | Custom build | Go binary with cgroup v1 strings (expects: low confidence match) |
+| `deep-scan-exec-cgv1` | Custom build | Shell entrypoint that exec's Go binary with cgroup v1 strings (expects: low confidence match via exec-chain) |
 | `deep-scan-cadvisor` | Upstream (cAdvisor v0.44.0) | Go binary with extensive cgroup v1 refs, v2-aware (expects: low confidence, v2-aware) |
 | `deep-scan-node-exporter` | Upstream (node-exporter v1.3.1) | Go binary, cgroup v1 positive control |
 | `deep-scan-nginx-negative` | Upstream (nginx 1.25-alpine) | Negative control — no cgroup references expected |
@@ -997,7 +998,8 @@ image-cgroupsv2-inspector/
         └── deep-scan-images/   # Containerfiles for deep-scan test images (NEW)
             ├── entrypoint-cgv1/
             ├── source-cgv1/
-            └── binary-cgv1/
+            ├── binary-cgv1/
+            └── exec-cgv1/
 ```
 
 ## Development

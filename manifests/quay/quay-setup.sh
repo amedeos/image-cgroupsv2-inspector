@@ -468,6 +468,14 @@ push_test_images() {
     podman rmi "deep-scan-binary-cgv1:latest" 2>/dev/null || true
     echo ""
 
+    # --- deep-scan-exec-cgv1 (built from Containerfile, exec chain to binary) ---
+    info "=== deep-scan-exec-cgv1 (shell entrypoint exec's Go binary with cgroup v1 strings) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/exec-cgv1" \
+        "Containerfile" "deep-scan-exec-cgv1" "latest" || true
+    add_tag "deep-scan-exec-cgv1" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-exec-cgv1:latest" 2>/dev/null || true
+    echo ""
+
     # --- deep-scan-cadvisor (upstream, cgroup v1 positive) ---
     info "=== deep-scan-cadvisor (cAdvisor v0.44.0, cgroup v1 positive) ==="
     pull_tag_push "gcr.io/cadvisor/cadvisor:v0.44.0" \
