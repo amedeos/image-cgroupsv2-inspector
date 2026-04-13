@@ -31,6 +31,15 @@ class BinaryInfo:
 
 
 @dataclass
+class DeepScanMatch:
+    """A single cgroup v1 heuristic match."""
+
+    source: str  # file where the match was found, e.g. "/entrypoint.sh"
+    pattern: str  # the cgroup v1 pattern matched, e.g. "memory.limit_in_bytes"
+    confidence: str  # "high", "medium", or "low"
+
+
+@dataclass
 class ImageAnalysisResult:
     """Result of analyzing a container image."""
 
@@ -39,6 +48,8 @@ class ImageAnalysisResult:
     java_binaries: list[BinaryInfo] = field(default_factory=list)
     node_binaries: list[BinaryInfo] = field(default_factory=list)
     dotnet_binaries: list[BinaryInfo] = field(default_factory=list)
+    deep_scan_matches: list[DeepScanMatch] = field(default_factory=list)
+    deep_scan_v2_aware_flag: bool = False
     error: str | None = None
 
     @property
@@ -113,6 +124,54 @@ class ImageAnalysisResult:
         compatible = all(b.is_compatible for b in self.dotnet_binaries)
         return "Yes" if compatible else "No"
 
+    @property
+    def deep_scan_match(self) -> str:
+        """Return 'true' if any cgroup v1 pattern was found, 'false' otherwise, '' if not scanned."""
+        if not hasattr(self, "deep_scan_matches") or self.deep_scan_matches is None:
+            return ""
+        return "true" if self.deep_scan_matches else "false"
+
+    @property
+    def deep_scan_confidence(self) -> str:
+        """Return the highest confidence level among all matches.
+
+        Priority: high > medium > low. Empty string if no matches or not scanned.
+        """
+        if not self.deep_scan_matches:
+            return ""
+        levels = {m.confidence for m in self.deep_scan_matches}
+        if "high" in levels:
+            return "high"
+        if "medium" in levels:
+            return "medium"
+        return "low"
+
+    @property
+    def deep_scan_sources(self) -> str:
+        """Return pipe-separated unique source files where matches were found."""
+        if not self.deep_scan_matches:
+            return ""
+        sources = dict.fromkeys(m.source for m in self.deep_scan_matches)
+        return "|".join(sources)
+
+    @property
+    def deep_scan_patterns(self) -> str:
+        """Return pipe-separated unique patterns matched."""
+        if not self.deep_scan_matches:
+            return ""
+        patterns = dict.fromkeys(m.pattern for m in self.deep_scan_matches)
+        return "|".join(patterns)
+
+    @property
+    def deep_scan_v2_aware(self) -> str:
+        """Return 'true' if any scanned source contains both v1 and v2 patterns.
+
+        Empty string if no deep scan was performed or no v1 matches found.
+        """
+        if not self.deep_scan_matches:
+            return ""
+        return "true" if self.deep_scan_v2_aware_flag else "false"
+
 
 class ImageAnalyzer:
     """
@@ -175,6 +234,7 @@ class ImageAnalyzer:
         pull_secret_path: str | None = None,
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
+        deep_scan: bool = False,
     ):
         """
         Initialize the image analyzer.
@@ -188,12 +248,14 @@ class ImageAnalyzer:
                 are rewritten to use this route so podman can pull them.
             openshift_token: Bearer token for authenticating to the internal
                 registry route via ``podman login``.
+            deep_scan: Enable heuristic deep-scan for cgroup v1 references.
         """
         self.rootfs_base = Path(rootfs_base_path).resolve()
         self.rootfs_path = self.rootfs_base / "rootfs"
         self.pull_secret_path = Path(pull_secret_path) if pull_secret_path else None
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
+        self.deep_scan = deep_scan
         self._registry_logged_in = False
 
         # Ensure rootfs directory exists
@@ -289,6 +351,53 @@ class ImageAnalyzer:
                     suffix = "/" + suffix
             return self.internal_registry_route + suffix
         return image_name
+
+    def _get_image_entrypoint(self, image_name: str, debug: bool = False) -> tuple[list[str] | None, list[str] | None]:
+        """Extract ENTRYPOINT and CMD from image metadata using podman inspect.
+
+        Args:
+            image_name: Image name (already pulled).
+            debug: Enable debug output.
+
+        Returns:
+            Tuple of (entrypoint, cmd) where each is a list of strings or None.
+        """
+        import json
+
+        entrypoint = None
+        cmd = None
+
+        exit_code, stdout, _stderr = self._run_command(
+            ["podman", "inspect", "--format", "{{json .Config.Entrypoint}}", image_name],
+            timeout=30,
+            debug=debug,
+        )
+        if exit_code == 0 and stdout.strip():
+            try:
+                parsed = json.loads(stdout.strip())
+                if isinstance(parsed, list) and parsed:
+                    entrypoint = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        exit_code, stdout, _stderr = self._run_command(
+            ["podman", "inspect", "--format", "{{json .Config.Cmd}}", image_name],
+            timeout=30,
+            debug=debug,
+        )
+        if exit_code == 0 and stdout.strip():
+            try:
+                parsed = json.loads(stdout.strip())
+                if isinstance(parsed, list) and parsed:
+                    cmd = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if debug:
+            print(f"      [DEBUG] Image ENTRYPOINT: {entrypoint}")
+            print(f"      [DEBUG] Image CMD: {cmd}")
+
+        return entrypoint, cmd
 
     def _setup_auth(self) -> str | None:
         """
@@ -1126,6 +1235,22 @@ class ImageAnalyzer:
                     )
                 )
 
+            # Deep scan: heuristic cgroup v1 detection
+            if self.deep_scan:
+                print("    Running deep-scan for cgroup v1 references...")
+                entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
+                from .deep_scan import run_deep_scan
+
+                deep_matches, v2_aware = run_deep_scan(
+                    extract_path=extract_path,
+                    image_name=podman_image,
+                    entrypoint=entrypoint,
+                    cmd=cmd,
+                    debug=debug,
+                )
+                result.deep_scan_matches = deep_matches
+                result.deep_scan_v2_aware_flag = v2_aware
+
             # Report findings
             if result.java_binaries:
                 for b in result.java_binaries:
@@ -1141,6 +1266,17 @@ class ImageAnalyzer:
                 for b in result.dotnet_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
                     print(f"      {compat} .NET: {b.version} at {b.path}")
+
+            if self.deep_scan and result.deep_scan_matches:
+                v2_note = " (v2-aware)" if result.deep_scan_v2_aware_flag else ""
+                print(f"      ⚠ Deep-scan: {len(result.deep_scan_matches)} cgroup v1 reference(s) found{v2_note}")
+                sources = dict.fromkeys(m.source for m in result.deep_scan_matches)
+                for src in sources:
+                    src_matches = [m for m in result.deep_scan_matches if m.source == src]
+                    patterns_str = ", ".join(dict.fromkeys(m.pattern for m in src_matches))
+                    print(f"        [{src_matches[0].confidence}] {src}: {patterns_str}")
+            elif self.deep_scan:
+                print("      ✓ Deep-scan: no cgroup v1 references found")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
                 print("      No Java, Node.js, or .NET binaries found")

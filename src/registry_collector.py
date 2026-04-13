@@ -34,6 +34,11 @@ CSV_COLUMNS = [
     "dotnet_version",
     "dotnet_cgroup_v2_compatible",
     "analysis_error",
+    "deep_scan_match",
+    "deep_scan_confidence",
+    "deep_scan_sources",
+    "deep_scan_patterns",
+    "deep_scan_v2_aware",
 ]
 
 

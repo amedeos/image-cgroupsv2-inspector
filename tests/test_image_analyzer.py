@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.image_analyzer import BinaryInfo, ImageAnalysisResult, ImageAnalyzer
+from src.image_analyzer import BinaryInfo, DeepScanMatch, ImageAnalysisResult, ImageAnalyzer
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -671,3 +671,121 @@ class TestBinaryPatterns:
         assert pattern.match("/usr/bin/dotnet") is not None
         assert pattern.match("/usr/share/dotnet/dotnet") is not None
         assert pattern.match("/usr/bin/dotnet-sdk") is None
+
+
+# ---------------------------------------------------------------------------
+# Deep scan result properties
+# ---------------------------------------------------------------------------
+
+
+class TestDeepScanResult:
+    """Tests for DeepScanMatch and ImageAnalysisResult deep_scan properties."""
+
+    def test_no_matches_returns_empty_strings(self):
+        result = ImageAnalysisResult(image_name="test", image_id="abc")
+        assert result.deep_scan_match == "false"
+        assert result.deep_scan_confidence == ""
+        assert result.deep_scan_sources == ""
+        assert result.deep_scan_patterns == ""
+
+    def test_single_match(self):
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="abc",
+            deep_scan_matches=[
+                DeepScanMatch(
+                    source="/entrypoint.sh",
+                    pattern="memory.limit_in_bytes",
+                    confidence="high",
+                ),
+            ],
+        )
+        assert result.deep_scan_match == "true"
+        assert result.deep_scan_confidence == "high"
+        assert result.deep_scan_sources == "/entrypoint.sh"
+        assert result.deep_scan_patterns == "memory.limit_in_bytes"
+
+    def test_multiple_matches_pipe_separated(self):
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="abc",
+            deep_scan_matches=[
+                DeepScanMatch("/entrypoint.sh", "memory.limit_in_bytes", "high"),
+                DeepScanMatch("/entrypoint.sh", "cpu.cfs_quota_us", "high"),
+                DeepScanMatch("/opt/helpers.sh", "cpuacct.usage", "medium"),
+            ],
+        )
+        assert result.deep_scan_match == "true"
+        assert result.deep_scan_confidence == "high"
+        assert result.deep_scan_sources == "/entrypoint.sh|/opt/helpers.sh"
+        assert result.deep_scan_patterns == "memory.limit_in_bytes|cpu.cfs_quota_us|cpuacct.usage"
+
+    def test_confidence_priority(self):
+        """Highest confidence wins: high > medium > low."""
+        r1 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+            ],
+        )
+        assert r1.deep_scan_confidence == "low"
+
+        r2 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+                DeepScanMatch("script", "p2", "medium"),
+            ],
+        )
+        assert r2.deep_scan_confidence == "medium"
+
+        r3 = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("bin", "p1", "low"),
+                DeepScanMatch("script", "p2", "medium"),
+                DeepScanMatch("entry", "p3", "high"),
+            ],
+        )
+        assert r3.deep_scan_confidence == "high"
+
+    def test_sources_deduplicated(self):
+        result = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "p1", "high"),
+                DeepScanMatch("/entry.sh", "p2", "high"),
+                DeepScanMatch("/entry.sh", "p3", "high"),
+            ],
+        )
+        assert result.deep_scan_sources == "/entry.sh"
+
+    def test_v2_aware_property(self):
+        result = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
+            ],
+            deep_scan_v2_aware_flag=True,
+        )
+        assert result.deep_scan_v2_aware == "true"
+
+    def test_v2_aware_false(self):
+        result = ImageAnalysisResult(
+            "t",
+            "",
+            deep_scan_matches=[
+                DeepScanMatch("/entry.sh", "memory.limit_in_bytes", "high"),
+            ],
+            deep_scan_v2_aware_flag=False,
+        )
+        assert result.deep_scan_v2_aware == "false"
+
+    def test_v2_aware_empty_when_no_matches(self):
+        result = ImageAnalysisResult("t", "")
+        assert result.deep_scan_v2_aware == ""
