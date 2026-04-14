@@ -1292,21 +1292,27 @@ class ImageAnalyzer:
             if result.java_binaries:
                 for b in result.java_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
-                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    compat_word = (
+                        "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    )
                     logger.debug("Java (%s): %s at %s — %s", b.runtime_type, b.version, b.path, compat_word)
                     print(f"      {compat} Java ({b.runtime_type}): {b.version} at {b.path}")
 
             if result.node_binaries:
                 for b in result.node_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
-                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    compat_word = (
+                        "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    )
                     logger.debug("Node.js: %s at %s — %s", b.version, b.path, compat_word)
                     print(f"      {compat} Node.js: {b.version} at {b.path}")
 
             if result.dotnet_binaries:
                 for b in result.dotnet_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
-                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    compat_word = (
+                        "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    )
                     logger.debug(".NET: %s at %s — %s", b.version, b.path, compat_word)
                     print(f"      {compat} .NET: {b.version} at {b.path}")
 
@@ -1314,7 +1320,8 @@ class ImageAnalyzer:
                 v2_note = " (v2-aware)" if result.deep_scan_v2_aware_flag else ""
                 logger.debug(
                     "Deep-scan: %d cgroup v1 reference(s) found%s",
-                    len(result.deep_scan_matches), v2_note,
+                    len(result.deep_scan_matches),
+                    v2_note,
                 )
                 print(f"      ⚠ Deep-scan: {len(result.deep_scan_matches)} cgroup v1 reference(s) found{v2_note}")
                 sources = dict.fromkeys(m.source for m in result.deep_scan_matches)
