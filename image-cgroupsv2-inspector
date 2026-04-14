@@ -320,25 +320,30 @@ def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Lo
     """
     Set up logging configuration.
 
+    The file handler always logs at DEBUG level so the log file captures
+    the same detail as ``-v`` stdout output.  The ``-v`` flag only controls
+    whether a StreamHandler is attached for console output.
+
     Args:
         log_to_file: Whether to enable file logging.
         log_file: Path to the log file.
-        verbose: Whether to enable verbose (DEBUG) logging.
+        verbose: Whether to enable verbose (DEBUG) logging to stdout.
 
     Returns:
         Configured logger instance.
     """
     logger = logging.getLogger("image-cgroupsv2-inspector")
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
-    # Log format
-    log_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    file_format = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(module)s.%(funcName)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     if log_to_file:
-        # File handler
         file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
-        file_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
-        file_handler.setFormatter(log_format)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(file_format)
         logger.addHandler(file_handler)
         print(f"📝 Logging to file: {log_file}")
 
@@ -370,28 +375,27 @@ def setup_rootfs(rootfs_path: str, logger: logging.Logger | None = None, skip_di
     Returns:
         True if successful, False otherwise.
     """
+    _log = logger or logging.getLogger("image-cgroupsv2-inspector")
     print(f"\n🔧 Setting up rootfs directory at: {rootfs_path}")
-    if logger:
-        logger.info(f"Setting up rootfs directory at: {rootfs_path}")
+    _log.info("Setting up rootfs directory at: %s", rootfs_path)
 
     manager = RootFSManager(rootfs_path)
 
-    # Create rootfs directory with ACLs (includes validation)
     success, msg = manager.create_rootfs_directory(skip_disk_check=skip_disk_check)
     if not success:
         print(f"✗ Failed to create rootfs: {msg}")
-        if logger:
-            logger.error(f"Failed to create rootfs: {msg}")
+        _log.error("Failed to create rootfs: %s", msg)
         return False
 
     print(f"\n✓ {msg}")
-    if logger:
-        logger.info(f"Rootfs setup successful: {msg}")
+    _log.info("Rootfs setup successful: %s", msg)
     return True
 
 
 def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None = None) -> None:
     """Print analysis summary from image record dicts."""
+    _log = logging.getLogger("image-cgroupsv2-inspector")
+
     java_found = sum(1 for img in images if img.get("java_binary", "None") != "None")
     node_found = sum(1 for img in images if img.get("node_binary", "None") != "None")
     dotnet_found = sum(1 for img in images if img.get("dotnet_binary", "None") != "None")
@@ -404,6 +408,13 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
     dotnet_compat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Yes")
     dotnet_incompat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "No")
     dotnet_unknown = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Unknown")
+
+    _log.debug("Analysis Results: Java found=%d (compat=%d, incompat=%d, unknown=%d), "
+               "Node.js found=%d (compat=%d, incompat=%d, unknown=%d), "
+               ".NET found=%d (compat=%d, incompat=%d, unknown=%d)",
+               java_found, java_compat, java_incompat, java_unknown,
+               node_found, node_compat, node_incompat, node_unknown,
+               dotnet_found, dotnet_compat, dotnet_incompat, dotnet_unknown)
 
     print("\n   🔬 Analysis Results:")
     print(f"      Java found in: {java_found} containers")
@@ -427,6 +438,7 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
     deep_scan_found = sum(1 for img in images if img.get("deep_scan_match") == "true")
     if deep_scan_found > 0 or any(img.get("deep_scan_match") != "" for img in images):
         print(f"      Deep-scan matches: {deep_scan_found} images with cgroup v1 references")
+        _log.debug("Deep-scan matches: %d images with cgroup v1 references", deep_scan_found)
         high = sum(1 for img in images if img.get("deep_scan_confidence") == "high")
         medium = sum(1 for img in images if img.get("deep_scan_confidence") == "medium")
         low = sum(1 for img in images if img.get("deep_scan_confidence") == "low")
@@ -436,18 +448,22 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
             print(f"        ⚠ medium confidence: {medium}")
         if low:
             print(f"        ⚠ low confidence: {low}")
+        _log.debug("Deep-scan confidence breakdown: high=%d, medium=%d, low=%d", high, medium, low)
         v2_aware_count = sum(1 for img in images if img.get("deep_scan_v2_aware") == "true")
         if v2_aware_count:
             print(f"        ✓ v2-aware (dual v1+v2 support): {v2_aware_count}")
         v1_only = deep_scan_found - v2_aware_count
         if v1_only > 0:
             print(f"        ✗ v1-only (likely incompatible): {v1_only}")
+        _log.debug("Deep-scan: v2-aware=%d, v1-only=%d", v2_aware_count, v1_only)
         go_libs_count = sum(
             1 for img in images if img.get("deep_scan_go_cgroup_libs", "") != ""
         )
         if go_libs_count:
+            _log.debug("Go cgroup libraries detected in %d images", go_libs_count)
             print(f"        📦 Go cgroup libraries detected: {go_libs_count} images")
     skipped_count = len(skipped_images) if skipped_images else 0
+    _log.debug("Images skipped (timeout): %d", skipped_count)
     print(f"      Images skipped (timeout): {skipped_count}")
 
 
@@ -485,21 +501,16 @@ def main() -> int:
     log_to_file = args.log_to_file or args.log_file != "image-cgroupsv2-inspector.log"
     logger = setup_logging(log_to_file, args.log_file, args.verbose)
 
-    if log_to_file:
-        logger.info("=" * 60)
-        logger.info("image-cgroupsv2-inspector started")
-        logger.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info("image-cgroupsv2-inspector started")
+    logger.info("=" * 60)
 
-    # Run system checks (podman, etc.)
-    if log_to_file:
-        logger.info("Running system checks...")
+    logger.info("Running system checks...")
     if not run_system_checks(verbose=args.verbose, deep_scan=args.deep_scan):
         print("\n✗ System checks failed. Please install the required dependencies.")
-        if log_to_file:
-            logger.error("System checks failed")
+        logger.error("System checks failed")
         return 1
-    if log_to_file:
-        logger.info("System checks passed")
+    logger.info("System checks passed")
 
     # Load .env early so env vars are available for both modes
     from dotenv import load_dotenv
@@ -510,13 +521,12 @@ def main() -> int:
 
     # Handle rootfs path if provided
     if args.rootfs_path:
-        if not setup_rootfs(args.rootfs_path, logger if log_to_file else None, skip_disk_check=args.skip_disk_check):
+        if not setup_rootfs(args.rootfs_path, logger, skip_disk_check=args.skip_disk_check):
             return 1
 
         if args.skip_collection:
             print("\n✓ Rootfs setup complete. Skipping image collection.")
-            if log_to_file:
-                logger.info("Rootfs setup complete. Skipping image collection.")
+            logger.info("Rootfs setup complete. Skipping image collection.")
             return 0
 
     # Registry mode env var fallback
@@ -562,8 +572,7 @@ def main() -> int:
         state_file_path = _build_state_file_path(registry_host, state_dir)
 
         print(f"\n🔌 Connecting to Quay registry: {args.registry_url}")
-        if log_to_file:
-            logger.info(f"Connecting to Quay registry: {args.registry_url}")
+        logger.info("Connecting to Quay registry: %s", args.registry_url)
         try:
             quay_client = QuayClient(
                 base_url=args.registry_url,
@@ -573,12 +582,10 @@ def main() -> int:
             quay_client.test_connection()
             quay_client.get_organization(args.registry_org)
             print(f"✓ Connected to Quay registry, organization: {args.registry_org}")
-            if log_to_file:
-                logger.info(f"Connected to Quay registry, organization: {args.registry_org}")
+            logger.info("Connected to Quay registry, organization: %s", args.registry_org)
         except QuayClientError as e:
             print(f"\n✗ Quay connection error: {e}")
-            if log_to_file:
-                logger.error(f"Quay connection error: {e}")
+            logger.error("Quay connection error: %s", e)
             return 1
 
         try:
@@ -604,37 +611,32 @@ def main() -> int:
 
             if not images:
                 print("\n⚠ No images found in the registry.")
-                if log_to_file:
-                    logger.warning("No images found in the registry")
+                logger.warning("No images found in the registry")
                 return 0
 
             if args.deep_scan and not args.analyze:
                 print("\n✗ Error: --deep-scan requires --analyze to be specified.")
-                if log_to_file:
-                    logger.error("--deep-scan requires --analyze")
+                logger.error("--deep-scan requires --analyze")
                 return 1
 
             if args.analyze:
                 if not args.rootfs_path:
                     print("\n✗ Error: --analyze requires --rootfs-path.")
-                    if log_to_file:
-                        logger.error("--analyze requires --rootfs-path")
+                    logger.error("--analyze requires --rootfs-path")
                     return 1
 
                 pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
-                    if log_to_file:
-                        logger.info(f"Using pull-secret: {pull_secret_path}")
+                    logger.info("Using pull-secret: %s", pull_secret_path)
                 else:
                     pull_secret_path = generate_registry_auth_json(
                         registry_host=registry_host,
                         token=args.registry_token,
                     )
                     print(f"🔑 Generated registry auth file: {pull_secret_path}")
-                    if log_to_file:
-                        logger.info(f"Generated registry auth file: {pull_secret_path}")
+                    logger.info("Generated registry auth file: %s", pull_secret_path)
 
                 manager = RootFSManager(args.rootfs_path)
                 rootfs_path = str(manager.get_rootfs_path().parent)
@@ -646,8 +648,7 @@ def main() -> int:
                 output_path.mkdir(parents=True, exist_ok=True)
                 csv_filepath = str(output_path / f"{registry_host}-{args.registry_org}-{timestamp}.csv")
 
-                if log_to_file:
-                    logger.info("Starting image analysis...")
+                logger.info("Starting image analysis...")
                 orchestrator = AnalysisOrchestrator(
                     rootfs_path=rootfs_path,
                     pull_secret_path=pull_secret_path,
@@ -661,53 +662,49 @@ def main() -> int:
                     images=images,
                     csv_filepath=csv_filepath,
                     debug=args.verbose,
-                    logger=logger if log_to_file else None,
+                    logger=logger,
                 )
-                if log_to_file:
-                    logger.info("Image analysis completed")
+                logger.info("Image analysis completed")
             else:
                 csv_path = registry_collector.save_to_csv(images, output_dir=args.output_dir)
                 skipped = []
-                if log_to_file:
-                    logger.info(f"Results saved to CSV: {csv_path}")
+                logger.info("Results saved to CSV: %s", csv_path)
 
-            # Summary (registry mode)
             print("\n📊 Summary:")
             print(f"   Source: Quay registry ({registry_host})")
             print(f"   Organization: {args.registry_org}")
             print(f"   Total images: {len(images)}")
             unique_count = len({img["image_name"] for img in images})
             print(f"   Unique images: {unique_count}")
+            logger.debug("Summary: source=Quay registry (%s), org=%s, total=%d, unique=%d",
+                         registry_host, args.registry_org, len(images), unique_count)
 
             if args.analyze:
                 _print_analysis_summary(images, skipped)
 
             print(f"\n   Output file: {csv_path}")
+            logger.debug("Output file: %s", csv_path)
 
         except Exception as e:
             print(f"\n✗ Error during registry scan: {e}")
-            if log_to_file:
-                logger.error(f"Error during registry scan: {e}")
+            logger.error("Error during registry scan: %s", e)
             if args.verbose:
                 import traceback
 
                 traceback.print_exc()
-                if log_to_file:
-                    logger.exception("Full traceback:")
+            logger.exception("Full traceback:")
             return 1
 
-        if log_to_file:
-            logger.info("=" * 60)
-            logger.info("image-cgroupsv2-inspector completed successfully")
-            logger.info("=" * 60)
+        logger.info("=" * 60)
+        logger.info("image-cgroupsv2-inspector completed successfully")
+        logger.info("=" * 60)
 
         print("\n✓ Done!")
         return 2 if skipped else 0
 
     # ── OpenShift mode ───────────────────────────────────────────
     try:
-        if log_to_file:
-            logger.info("Creating OpenShift client...")
+        logger.info("Creating OpenShift client...")
         client = OpenShiftClient(
             api_url=args.api_url,
             token=args.token,
@@ -721,16 +718,13 @@ def main() -> int:
             print("  Please provide --api-url and --token, or set them in .env file.")
             print("\n  To get a token, run: oc whoami -t")
             print("  To get the API URL, run: oc whoami --show-server")
-            if log_to_file:
-                logger.error("OpenShift credentials not provided")
+            logger.error("OpenShift credentials not provided")
             return 1
 
         print("\n🔌 Connecting to OpenShift cluster...")
-        if log_to_file:
-            logger.info(f"Connecting to OpenShift cluster at {client.api_url}")
+        logger.info("Connecting to OpenShift cluster at %s", client.api_url)
         client.connect()
-        if log_to_file:
-            logger.info(f"Connected successfully to cluster: {client.cluster_name}")
+        logger.info("Connected successfully to cluster: %s", client.cluster_name)
 
         if args.clean_state is True:
             client.disconnect()
@@ -740,68 +734,56 @@ def main() -> int:
 
     except ValueError as e:
         print(f"\n✗ Configuration error: {e}")
-        if log_to_file:
-            logger.error(f"Configuration error: {e}")
+        logger.error("Configuration error: %s", e)
         return 1
     except Exception as e:
         print(f"\n✗ Connection error: {e}")
-        if log_to_file:
-            logger.error(f"Connection error: {e}")
+        logger.error("Connection error: %s", e)
         return 1
 
     skipped: list[str] = []
 
     try:
-        # Handle namespace filtering
         if args.namespace:
             print(f"\n📋 Inspecting single namespace: {args.namespace}")
-            if log_to_file:
-                logger.info(f"Inspecting single namespace: {args.namespace}")
+            logger.info("Inspecting single namespace: %s", args.namespace)
             collector = ImageCollector(client, namespace=args.namespace)
         else:
             exclude_patterns = None
             if args.exclude_namespaces:
                 exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
                 print(f"\n📋 Namespace exclusion patterns: {', '.join(exclude_patterns)}")
-                if log_to_file:
-                    logger.info(f"Namespace exclusion patterns: {', '.join(exclude_patterns)}")
+                logger.info("Namespace exclusion patterns: %s", ", ".join(exclude_patterns))
             collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
 
-        if log_to_file:
-            logger.info("Collecting container images from cluster...")
+        logger.info("Collecting container images from cluster...")
         total = collector.collect_all()
-        if log_to_file:
-            logger.info(f"Collected {total} containers")
+        logger.info("Collected %d containers", total)
 
         if total == 0:
             print("\n⚠ No containers found in the cluster.")
-            if log_to_file:
-                logger.warning("No containers found in the cluster")
+            logger.warning("No containers found in the cluster")
             return 0
 
         if args.deep_scan and not args.analyze:
             print("\n✗ Error: --deep-scan requires --analyze to be specified.")
-            if log_to_file:
-                logger.error("--deep-scan requires --analyze")
+            logger.error("--deep-scan requires --analyze")
             return 1
 
         if args.analyze:
             if not args.rootfs_path:
                 print("\n✗ Error: --analyze requires --rootfs-path to be specified.")
-                if log_to_file:
-                    logger.error("--analyze requires --rootfs-path to be specified")
+                logger.error("--analyze requires --rootfs-path to be specified")
                 return 1
 
             pull_secret_path = None
             if args.pull_secret and Path(args.pull_secret).exists():
                 pull_secret_path = args.pull_secret
                 print(f"\n🔑 Using pull-secret: {pull_secret_path}")
-                if log_to_file:
-                    logger.info(f"Using pull-secret: {pull_secret_path}")
+                logger.info("Using pull-secret: %s", pull_secret_path)
             else:
                 print("\n⚠ Warning: No pull-secret found. Some images may fail to pull.")
-                if log_to_file:
-                    logger.warning("No pull-secret found. Some images may fail to pull.")
+                logger.warning("No pull-secret found. Some images may fail to pull.")
 
             manager = RootFSManager(args.rootfs_path)
             rootfs_path = str(manager.get_rootfs_path().parent)
@@ -809,12 +791,11 @@ def main() -> int:
             if args.internal_registry_route:
                 internal_registry_route = args.internal_registry_route
                 print(f"✓ Using custom internal registry route: {internal_registry_route}")
-                if log_to_file:
-                    logger.info(f"Using custom internal registry route: {internal_registry_route}")
+                logger.info("Using custom internal registry route: %s", internal_registry_route)
             else:
                 internal_registry_route = client.get_internal_registry_route()
-                if internal_registry_route and log_to_file:
-                    logger.info(f"Auto-detected internal registry route: {internal_registry_route}")
+                if internal_registry_route:
+                    logger.info("Auto-detected internal registry route: %s", internal_registry_route)
 
             image_dicts = [img.to_dict() for img in collector.images]
 
@@ -825,8 +806,7 @@ def main() -> int:
             output_path_dir.mkdir(parents=True, exist_ok=True)
             csv_filepath = str(output_path_dir / f"{client.cluster_name}-{timestamp}.csv")
 
-            if log_to_file:
-                logger.info("Starting image analysis...")
+            logger.info("Starting image analysis...")
             orchestrator = AnalysisOrchestrator(
                 rootfs_path=rootfs_path,
                 pull_secret_path=pull_secret_path,
@@ -842,15 +822,13 @@ def main() -> int:
                 images=image_dicts,
                 csv_filepath=csv_filepath,
                 debug=args.verbose,
-                logger=logger if log_to_file else None,
+                logger=logger,
             )
-            if log_to_file:
-                logger.info("Image analysis completed")
+            logger.info("Image analysis completed")
         else:
             csv_path = collector.save_to_csv(cluster_name=client.cluster_name, output_dir=args.output_dir)
             skipped = []
-            if log_to_file:
-                logger.info(f"Results saved to CSV: {csv_path}")
+            logger.info("Results saved to CSV: %s", csv_path)
 
         # Show summary
         if not args.analyze:
@@ -866,39 +844,42 @@ def main() -> int:
         print(f"   Unique images: {len(unique_images)}")
         print(f"   Namespaces: {df['namespace'].nunique()}")
         print(f"   Object types: {df['object_type'].value_counts().to_dict()}")
+        logger.debug("Summary: total=%d, unique=%d, namespaces=%d",
+                      len(df), len(unique_images), df["namespace"].nunique())
 
         if args.analyze:
             _print_analysis_summary(image_dicts, skipped)
 
         print(f"\n   Output file: {csv_path}")
+        logger.debug("Output file: %s", csv_path)
 
         if args.verbose:
             print("\n📋 Top 10 most used images:")
             top_images = df["image_name"].value_counts().head(10)
             for img, count in top_images.items():
                 print(f"   {count:4d} × {img}")
+        logger.debug("Top 10 most used images:")
+        top_images = df["image_name"].value_counts().head(10)
+        for img, count in top_images.items():
+            logger.debug("   %4d x %s", count, img)
 
     except Exception as e:
         print(f"\n✗ Error during collection: {e}")
-        if log_to_file:
-            logger.error(f"Error during collection: {e}")
+        logger.error("Error during collection: %s", e)
         if args.verbose:
             import traceback
 
             traceback.print_exc()
-            if log_to_file:
-                logger.exception("Full traceback:")
+        logger.exception("Full traceback:")
         return 1
 
     finally:
         client.disconnect()
-        if log_to_file:
-            logger.info("Disconnected from OpenShift cluster")
+        logger.info("Disconnected from OpenShift cluster")
 
-    if log_to_file:
-        logger.info("=" * 60)
-        logger.info("image-cgroupsv2-inspector completed successfully")
-        logger.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info("image-cgroupsv2-inspector completed successfully")
+    logger.info("=" * 60)
 
     print("\n✓ Done!")
     return 2 if skipped else 0

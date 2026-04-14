@@ -132,8 +132,7 @@ class AnalysisOrchestrator:
                 scan_state = ScanState.load(self.state_file_path)
                 if scan_state.scanned_count == 0 and scan_state.target == "":
                     print("WARNING: --resume specified but no state file found; starting full scan")
-                    if logger:
-                        logger.warning("--resume specified but no state file found; starting full scan")
+                    logger.warning("--resume specified but no state file found; starting full scan")
                     scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
                 else:
                     if scan_state.version != STATE_VERSION:
@@ -141,12 +140,11 @@ class AnalysisOrchestrator:
                             f"WARNING: state file version {scan_state.version} "
                             f"differs from current version {STATE_VERSION}; proceeding anyway"
                         )
-                        if logger:
-                            logger.warning(
-                                "State file version %d differs from current version %d",
-                                scan_state.version,
-                                STATE_VERSION,
-                            )
+                        logger.warning(
+                            "State file version %d differs from current version %d",
+                            scan_state.version,
+                            STATE_VERSION,
+                        )
                     if scan_state.csv_filepath and csv_filepath:
                         csv_filepath = scan_state.csv_filepath
 
@@ -164,12 +162,15 @@ class AnalysisOrchestrator:
                         print(f"  Retrying {scan_state.error_count} previously failed images")
                     if scan_state.timeout_count:
                         print(f"  Retrying {scan_state.timeout_count} previously timed-out images")
-                    if logger:
-                        logger.info(
-                            "Resuming: skipping %d already-scanned images (%d remaining)",
-                            len(skipped),
-                            len(remaining),
-                        )
+                    logger.info(
+                        "Resuming: skipping %d already-scanned images (%d remaining)",
+                        len(skipped),
+                        len(remaining),
+                    )
+                    if scan_state.error_count:
+                        logger.debug("Retrying %d previously failed images", scan_state.error_count)
+                    if scan_state.timeout_count:
+                        logger.debug("Retrying %d previously timed-out images", scan_state.timeout_count)
                     unique_image_names = remaining
             else:
                 scan_state = ScanState(target=self.target, csv_filepath=csv_filepath)
@@ -181,8 +182,7 @@ class AnalysisOrchestrator:
 
         for idx, image_name in enumerate(unique_image_names, 1):
             print(f"[{idx}/{total}] Analyzing: {image_name}")
-            if logger:
-                logger.info("[%d/%d] Analyzing image: %s", idx, total, image_name)
+            logger.info("[%d/%d] Analyzing image: %s", idx, total, image_name)
 
             try:
                 result = self._analyze_with_timeout(analyzer, image_name, debug=debug)
@@ -190,12 +190,11 @@ class AnalysisOrchestrator:
                 analyzed_count += 1
             except _ImageTimeout:
                 print(f"WARNING: Skipping image {image_name} — timed out after {self.image_timeout} seconds")
-                if logger:
-                    logger.warning(
-                        "Skipping image %s — timed out after %d seconds",
-                        image_name,
-                        self.image_timeout,
-                    )
+                logger.warning(
+                    "Skipping image %s — timed out after %d seconds",
+                    image_name,
+                    self.image_timeout,
+                )
                 skipped_images.append(image_name)
                 analyzer.cleanup_image(image_name, debug=debug)
                 results_cache[image_name] = ImageAnalysisResult(
@@ -205,8 +204,7 @@ class AnalysisOrchestrator:
                 )
             except Exception as exc:
                 print(f"  Error analyzing image: {exc}")
-                if logger:
-                    logger.error("Error analyzing image %s: %s", image_name, exc)
+                logger.error("Error analyzing image %s: %s", image_name, exc)
                 if debug:
                     traceback.print_exc()
                 results_cache[image_name] = ImageAnalysisResult(image_name=image_name, image_id="", error=str(exc))
@@ -227,6 +225,7 @@ class AnalysisOrchestrator:
             if csv_filepath:
                 self._save_csv(images, csv_filepath)
                 row_count = len(images)
+                logger.debug("Progress saved: %d rows", row_count)
                 print(f"\U0001f4be Progress saved: {row_count} rows")
 
         self._apply_results(images, results_cache)
@@ -235,6 +234,7 @@ class AnalysisOrchestrator:
             self._save_csv(images, csv_filepath)
 
         if skipped_images:
+            logger.debug("Skipped images (timeout): %s", ", ".join(skipped_images))
             print("\n=== Skipped images (timeout) ===")
             for name in skipped_images:
                 print(name)

@@ -27,6 +27,8 @@ from kubernetes.client.rest import ApiException
 
 from .openshift_client import OpenShiftClient
 
+logger = logging.getLogger(__name__)
+
 # Default namespace patterns to exclude (infrastructure namespaces)
 DEFAULT_EXCLUDE_NAMESPACE_PATTERNS = ["openshift-*", "kube-*"]
 
@@ -318,6 +320,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from standalone Pods...")
         print("  Collecting images from standalone Pods...")
         core_v1 = self.client.get_core_v1_api()
         count = 0
@@ -399,8 +402,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from Pods: %s", e)
             print(f"    Warning: Error collecting from Pods: {e}")
 
+        logger.debug("Found %d containers in standalone Pods (skipped %d managed/static pods)", count, skipped)
         print(f"    Found {count} containers in standalone Pods (skipped {skipped} managed/static pods)")
         return count
 
@@ -414,6 +419,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from Deployments...")
         print("  Collecting images from Deployments...")
         apps_v1 = self.client.get_apps_v1_api()
         count = 0
@@ -453,8 +459,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from Deployments: %s", e)
             print(f"    Warning: Error collecting from Deployments: {e}")
 
+        logger.debug("Found %d containers in Deployments", count)
         print(f"    Found {count} containers in Deployments")
         return count
 
@@ -467,6 +475,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from StatefulSets...")
         print("  Collecting images from StatefulSets...")
         apps_v1 = self.client.get_apps_v1_api()
         count = 0
@@ -503,8 +512,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from StatefulSets: %s", e)
             print(f"    Warning: Error collecting from StatefulSets: {e}")
 
+        logger.debug("Found %d containers in StatefulSets", count)
         print(f"    Found {count} containers in StatefulSets")
         return count
 
@@ -517,6 +528,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from DaemonSets...")
         print("  Collecting images from DaemonSets...")
         apps_v1 = self.client.get_apps_v1_api()
         count = 0
@@ -553,8 +565,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from DaemonSets: %s", e)
             print(f"    Warning: Error collecting from DaemonSets: {e}")
 
+        logger.debug("Found %d containers in DaemonSets", count)
         print(f"    Found {count} containers in DaemonSets")
         return count
 
@@ -568,6 +582,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from DeploymentConfigs...")
         print("  Collecting images from DeploymentConfigs...")
         count = 0
         skipped_ns = 0
@@ -620,12 +635,16 @@ class ImageCollector:
 
         except ApiException as e:
             if e.status == 404:
+                logger.debug("DeploymentConfig API not available (apps.openshift.io not installed, skipping)")
                 print("    DeploymentConfig API not available (apps.openshift.io not installed, skipping)")
             else:
+                logger.debug("Error collecting from DeploymentConfigs: %s", e)
                 print(f"    Warning: Error collecting from DeploymentConfigs: {e}")
         except Exception as e:
+            logger.debug("Error collecting from DeploymentConfigs: %s", e)
             print(f"    Warning: Error collecting from DeploymentConfigs: {e}")
 
+        logger.debug("Found %d containers in DeploymentConfigs", count)
         print(f"    Found {count} containers in DeploymentConfigs")
         return count
 
@@ -638,6 +657,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from standalone Jobs...")
         print("  Collecting images from standalone Jobs...")
         batch_v1 = self.client.get_batch_v1_api()
         count = 0
@@ -677,8 +697,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from Jobs: %s", e)
             print(f"    Warning: Error collecting from Jobs: {e}")
 
+        logger.debug("Found %d containers in standalone Jobs (skipped %d CronJob-managed)", count, skipped)
         print(f"    Found {count} containers in standalone Jobs (skipped {skipped} CronJob-managed)")
         return count
 
@@ -691,6 +713,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from CronJobs...")
         print("  Collecting images from CronJobs...")
         batch_v1 = self.client.get_batch_v1_api()
         count = 0
@@ -723,8 +746,10 @@ class ImageCollector:
                 count += self._add_container_info(all_containers, namespace, "CronJob", cj_name)
 
         except Exception as e:
+            logger.debug("Error collecting from CronJobs: %s", e)
             print(f"    Warning: Error collecting from CronJobs: {e}")
 
+        logger.debug("Found %d containers in CronJobs", count)
         print(f"    Found {count} containers in CronJobs")
         return count
 
@@ -737,6 +762,7 @@ class ImageCollector:
         Returns:
             Number of containers found.
         """
+        logger.debug("Collecting images from standalone ReplicaSets...")
         print("  Collecting images from standalone ReplicaSets...")
         apps_v1 = self.client.get_apps_v1_api()
         count = 0
@@ -784,8 +810,10 @@ class ImageCollector:
                 )
 
         except Exception as e:
+            logger.debug("Error collecting from ReplicaSets: %s", e)
             print(f"    Warning: Error collecting from ReplicaSets: {e}")
 
+        logger.debug("Found %d containers in standalone ReplicaSets (skipped %d managed/empty)", count, skipped)
         print(f"    Found {count} containers in standalone ReplicaSets (skipped {skipped} managed/empty)")
         return count
 
@@ -802,11 +830,15 @@ class ImageCollector:
             Total number of containers found.
         """
         if self.namespace:
+            logger.debug("Collecting container images from namespace: %s", self.namespace)
             print(f"\n📦 Collecting container images from namespace: {self.namespace}")
         else:
+            logger.debug("Collecting container images from cluster...")
             print("\n📦 Collecting container images from cluster...")
+        logger.debug("Only top-level controllers are reported, child objects are skipped")
         print("  (Only top-level controllers are reported, child objects are skipped)")
         if self.exclude_patterns:
+            logger.debug("Excluding namespaces matching: %s", ", ".join(self.exclude_patterns))
             print(f"  (Excluding namespaces matching: {', '.join(self.exclude_patterns)})")
         self.images = []  # Reset
         self._excluded_namespaces_cache.clear()  # Clear cache for fresh collection
@@ -827,8 +859,15 @@ class ImageCollector:
         # 3. Pods (only standalone)
         total += self.collect_from_pods()  # Skip all controller-managed
 
+        logger.debug("Total containers found: %d", total)
         print(f"\n✓ Total containers found: {total}")
         if self._excluded_namespaces_cache:
+            logger.debug(
+                "Excluded %d namespaces: %s%s",
+                len(self._excluded_namespaces_cache),
+                ", ".join(sorted(self._excluded_namespaces_cache)[:5]),
+                "..." if len(self._excluded_namespaces_cache) > 5 else "",
+            )
             print(
                 f"  (Excluded {len(self._excluded_namespaces_cache)} namespaces: {', '.join(sorted(self._excluded_namespaces_cache)[:5])}{'...' if len(self._excluded_namespaces_cache) > 5 else ''})"
             )
@@ -893,6 +932,7 @@ class ImageCollector:
         df = self.to_dataframe()
         df.to_csv(filepath, index=False)
 
+        logger.debug("Saved %d records to %s", len(df), filepath)
         print(f"\n✓ Saved {len(df)} records to {filepath}")
         return str(filepath)
 

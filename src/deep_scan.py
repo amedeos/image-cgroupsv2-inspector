@@ -14,8 +14,11 @@ Confidence levels:
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Cgroup v1 controller paths (directories under /sys/fs/cgroup/)
@@ -361,6 +364,7 @@ def _run_strings(file_path: Path, debug: bool = False) -> str | None:
     try:
         file_size = file_path.stat().st_size
         if file_size > _MAX_BINARY_SIZE:
+            logger.debug("Binary too large for strings: %d bytes > %d", file_size, _MAX_BINARY_SIZE)
             if debug:
                 print(f"      [DEBUG] Binary too large for strings: {file_size} bytes > {_MAX_BINARY_SIZE}")
             return None
@@ -377,19 +381,23 @@ def _run_strings(file_path: Path, debug: bool = False) -> str | None:
             timeout=120,
         )
         if result.returncode != 0:
+            logger.debug("strings command failed: %s", result.stderr[:200])
             if debug:
                 print(f"      [DEBUG] strings command failed: {result.stderr[:200]}")
             return None
         return result.stdout
     except FileNotFoundError:
+        logger.debug("'strings' command not found in PATH")
         if debug:
             print("      [DEBUG] 'strings' command not found in PATH")
         return None
     except subprocess.TimeoutExpired:
+        logger.debug("strings command timed out")
         if debug:
             print("      [DEBUG] strings command timed out")
         return None
     except Exception as e:
+        logger.debug("strings error: %s", e)
         if debug:
             print(f"      [DEBUG] strings error: {e}")
         return None
@@ -431,6 +439,7 @@ def scan_binary_strings(
     for binary_ref in binary_refs:
         resolved = _resolve_script_in_rootfs(binary_ref, extract_path)
         if resolved is None:
+            logger.debug("Could not resolve binary in rootfs: %s", binary_ref)
             if debug:
                 print(f"      [DEBUG] Could not resolve binary in rootfs: {binary_ref}")
             continue
@@ -441,10 +450,16 @@ def scan_binary_strings(
         scanned_binaries.add(real_path_str)
 
         if not _is_elf_binary(resolved):
+            logger.debug("Not an ELF binary, skipping: %s", binary_ref)
             if debug:
                 print(f"      [DEBUG] Not an ELF binary, skipping: {binary_ref}")
             continue
 
+        try:
+            size_mb = resolved.stat().st_size / (1024 * 1024)
+            logger.debug("Running strings on binary: %s (%.1f MB)", binary_ref, size_mb)
+        except OSError:
+            logger.debug("Running strings on binary: %s", binary_ref)
         if debug:
             try:
                 size_mb = resolved.stat().st_size / (1024 * 1024)
@@ -456,10 +471,10 @@ def scan_binary_strings(
         if strings_output is None:
             continue
 
-        # Check for Go cgroup library imports
         go_deps = find_go_cgroup_deps(strings_output)
         if go_deps:
             all_go_deps.extend(dep for dep in go_deps if dep not in all_go_deps)
+            logger.debug("  Found %d Go cgroup libraries: %s", len(go_deps), ", ".join(go_deps))
             if debug:
                 print(f"      [DEBUG]   Found {len(go_deps)} Go cgroup libraries: {', '.join(go_deps)}")
 
@@ -474,16 +489,20 @@ def scan_binary_strings(
                         confidence="low",
                     )
                 )
+            logger.debug("  Found %d cgroup v1 patterns in %s", len(v1_patterns), binary_ref)
             if debug:
                 print(f"      [DEBUG]   Found {len(v1_patterns)} cgroup v1 patterns in {binary_ref}")
 
             v2_patterns = find_cgroupv2_patterns(strings_output)
             if v2_patterns:
                 v2_aware = True
+                logger.debug("  Also found %d cgroup v2 patterns — v2-aware", len(v2_patterns))
                 if debug:
                     print(f"      [DEBUG]   Also found {len(v2_patterns)} cgroup v2 patterns → v2-aware")
-        elif debug:
-            print(f"      [DEBUG]   No cgroup v1 patterns found in {binary_ref}")
+        else:
+            logger.debug("  No cgroup v1 patterns found in %s", binary_ref)
+            if debug:
+                print(f"      [DEBUG]   No cgroup v1 patterns found in {binary_ref}")
 
     return matches, v2_aware, all_go_deps
 
@@ -544,6 +563,7 @@ def scan_entrypoint_scripts(
         if real_path_str in scanned_files:
             return
         if depth > _MAX_SOURCE_DEPTH:
+            logger.debug("Max source depth reached at %s", container_path)
             if debug:
                 print(f"      [DEBUG] Max source depth reached at {container_path}")
             return
@@ -551,10 +571,12 @@ def scan_entrypoint_scripts(
 
         content = _read_script_content(file_path)
         if content is None:
+            logger.debug("Cannot read script: %s", container_path)
             if debug:
                 print(f"      [DEBUG] Cannot read script: {container_path}")
             return
 
+        logger.debug("Scanning script: %s (confidence=%s, depth=%d)", container_path, confidence, depth)
         if debug:
             print(f"      [DEBUG] Scanning script: {container_path} (confidence={confidence}, depth={depth})")
 
@@ -568,12 +590,14 @@ def scan_entrypoint_scripts(
                         confidence=confidence,
                     )
                 )
+            logger.debug("  Found %d cgroup v1 patterns in %s", len(v1_patterns), container_path)
             if debug:
                 print(f"      [DEBUG]   Found {len(v1_patterns)} cgroup v1 patterns in {container_path}")
 
             v2_patterns = find_cgroupv2_patterns(content)
             if v2_patterns:
                 v2_aware = True
+                logger.debug("  Also found %d cgroup v2 patterns — v2-aware", len(v2_patterns))
                 if debug:
                     print(f"      [DEBUG]   Also found {len(v2_patterns)} cgroup v2 patterns → v2-aware")
 
@@ -609,32 +633,39 @@ def scan_entrypoint_scripts(
 
                 if binary_container_path not in _INTERPRETER_PATHS:
                     discovered_binaries.append(binary_container_path)
+                    logger.debug("  Discovered ELF binary via exec chain: %s", binary_container_path)
                     if debug:
                         print(f"      [DEBUG]   Discovered ELF binary via exec chain: {binary_container_path}")
 
     if not entrypoint_cmd:
+        logger.debug("No entrypoint/cmd to scan")
         if debug:
             print("      [DEBUG] No entrypoint/cmd to scan")
         return matches, v2_aware, discovered_binaries
 
     entrypoint_ref = entrypoint_cmd[0]
 
+    logger.debug("Entrypoint reference: %s", entrypoint_ref)
+    logger.debug("Full entrypoint+cmd: %s", entrypoint_cmd)
     if debug:
         print(f"      [DEBUG] Entrypoint reference: {entrypoint_ref}")
         print(f"      [DEBUG] Full entrypoint+cmd: {entrypoint_cmd}")
 
     if "/" not in entrypoint_ref:
+        logger.debug("Skipping non-path entrypoint: %s", entrypoint_ref)
         if debug:
             print(f"      [DEBUG] Skipping non-path entrypoint: {entrypoint_ref}")
         return matches, v2_aware, discovered_binaries
 
     resolved = _resolve_script_in_rootfs(entrypoint_ref, extract_path)
     if resolved is None:
+        logger.debug("Could not resolve entrypoint in rootfs: %s", entrypoint_ref)
         if debug:
             print(f"      [DEBUG] Could not resolve entrypoint in rootfs: {entrypoint_ref}")
         return matches, v2_aware, discovered_binaries
 
     if not _is_shell_script(resolved):
+        logger.debug("Entrypoint is not a shell script: %s", entrypoint_ref)
         if debug:
             print(f"      [DEBUG] Entrypoint is not a shell script: {entrypoint_ref}")
         return matches, v2_aware, discovered_binaries
@@ -672,6 +703,11 @@ def run_deep_scan(
         - v2_aware: True if any scanned source has both v1 and v2 patterns
         - go_cgroup_libs: list of detected Go cgroup package paths
     """
+    logger.debug("Deep scan enabled for %s", image_name)
+    logger.debug("Extract path: %s", extract_path)
+    logger.debug("ENTRYPOINT: %s", entrypoint)
+    logger.debug("CMD: %s", cmd)
+    logger.debug("Loaded %d cgroup v1 patterns", len(_PATTERN_STRINGS))
     if debug:
         print(f"      [DEBUG] Deep scan enabled for {image_name}")
         print(f"      [DEBUG] Extract path: {extract_path}")
@@ -711,6 +747,7 @@ def run_deep_scan(
         if "/" not in ref or ref.startswith("-"):
             continue
         if ref in _INTERPRETER_PATHS:
+            logger.debug("Skipping interpreter binary: %s", ref)
             if debug:
                 print(f"      [DEBUG] Skipping interpreter binary: {ref}")
             continue
@@ -723,6 +760,7 @@ def run_deep_scan(
             binary_refs.append(ref)
 
     if binary_refs:
+        logger.debug("Binary refs to scan with strings: %s", binary_refs)
         if debug:
             print(f"      [DEBUG] Binary refs to scan with strings: {binary_refs}")
         binary_matches, binary_v2_aware, go_libs = scan_binary_strings(

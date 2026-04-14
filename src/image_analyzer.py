@@ -11,12 +11,15 @@ Supported runtimes and minimum versions for cgroup v2:
 """
 
 import contextlib
+import logging
 import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -288,11 +291,17 @@ class ImageAnalyzer:
             Tuple of (exit_code, stdout, stderr)
         """
         try:
+            logger.debug("Running: %s", " ".join(cmd))
             if debug:
                 print(f"      [DEBUG] Running: {' '.join(cmd)}")
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
+            logger.debug("Exit code: %d", result.returncode)
+            if result.stdout:
+                logger.debug("stdout: %s", result.stdout[:1000])
+            if result.stderr:
+                logger.debug("stderr: %s", result.stderr[-1000:])
             if debug:
                 print(f"      [DEBUG] Exit code: {result.returncode}")
                 if result.stdout:
@@ -302,10 +311,12 @@ class ImageAnalyzer:
 
             return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
+            logger.debug("Command timed out after %ds", timeout)
             if debug:
                 print(f"      [DEBUG] Command timed out after {timeout}s")
             return -1, "", "Command timed out"
         except Exception as e:
+            logger.debug("Exception: %s", e)
             if debug:
                 print(f"      [DEBUG] Exception: {e}")
             return -1, "", str(e)
@@ -338,8 +349,10 @@ class ImageAnalyzer:
         exit_code, _stdout, stderr = self._run_command(cmd, timeout=30, debug=debug)
         if exit_code == 0:
             self._registry_logged_in = True
+            logger.debug("Logged in to internal registry: %s", self.internal_registry_route)
             print(f"    ✓ Logged in to internal registry: {self.internal_registry_route}")
             return True
+        logger.debug("Failed to login to internal registry: %s", stderr.strip())
         print(f"    ✗ Failed to login to internal registry: {stderr.strip()}")
         return False
 
@@ -404,6 +417,8 @@ class ImageAnalyzer:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        logger.debug("Image ENTRYPOINT: %s", entrypoint)
+        logger.debug("Image CMD: %s", cmd)
         if debug:
             print(f"      [DEBUG] Image ENTRYPOINT: {entrypoint}")
             print(f"      [DEBUG] Image CMD: {cmd}")
@@ -440,6 +455,7 @@ class ImageAnalyzer:
         """
         pull_name = self._rewrite_internal_registry(image_name)
         if pull_name != image_name:
+            logger.debug("Rewriting internal registry URL: %s -> %s", image_name, pull_name)
             if debug:
                 print(f"      [DEBUG] Rewriting internal registry URL: {image_name} -> {pull_name}")
             self._login_internal_registry(debug=debug)
@@ -449,11 +465,13 @@ class ImageAnalyzer:
         auth_file = self._setup_auth()
         if auth_file:
             cmd.extend(["--authfile", auth_file])
+            logger.debug("Using authfile: %s", auth_file)
             if debug:
                 print(f"      [DEBUG] Using authfile: {auth_file}")
 
         cmd.append(pull_name)
 
+        logger.debug("Pulling image...")
         if debug:
             print("      [DEBUG] Pulling image...")
 
@@ -464,6 +482,7 @@ class ImageAnalyzer:
             error_detail = error_lines[-1] if error_lines else stderr[-500:]
             return False, f"Failed to pull image: {error_detail}"
 
+        logger.debug("Pull successful")
         if debug:
             print("      [DEBUG] Pull successful")
 
@@ -482,11 +501,13 @@ class ImageAnalyzer:
         """
         tar_path = self.rootfs_path / "image-rootfs.tar"
 
+        logger.debug("Tar will be saved to: %s", tar_path)
+        logger.debug("rootfs_path: %s", self.rootfs_path)
         if debug:
             print(f"      [DEBUG] Tar will be saved to: {tar_path}")
             print(f"      [DEBUG] rootfs_path: {self.rootfs_path}")
 
-        # Create container (don't start it)
+        logger.debug("Creating container from image...")
         if debug:
             print("      [DEBUG] Creating container from image...")
 
@@ -499,11 +520,12 @@ class ImageAnalyzer:
 
         container_id = stdout.strip()
 
+        logger.debug("Container created: %s", container_id)
         if debug:
             print(f"      [DEBUG] Container created: {container_id}")
 
         try:
-            # Export container filesystem
+            logger.debug("Exporting container to tar...")
             if debug:
                 print("      [DEBUG] Exporting container to tar...")
 
@@ -519,6 +541,7 @@ class ImageAnalyzer:
             # Verify tar was created
             if tar_path.exists():
                 tar_size = tar_path.stat().st_size
+                logger.debug("Tar created: %s (%d bytes)", tar_path, tar_size)
                 if debug:
                     print(f"      [DEBUG] Tar created: {tar_path} ({tar_size} bytes)")
             else:
@@ -527,7 +550,7 @@ class ImageAnalyzer:
             return True, str(tar_path), ""
 
         finally:
-            # Always remove the container
+            logger.debug("Removing container %s...", container_id)
             if debug:
                 print(f"      [DEBUG] Removing container {container_id}...")
             self._run_command(["podman", "rm", "-f", container_id], debug=debug)
@@ -548,17 +571,19 @@ class ImageAnalyzer:
         """
         extract_path = self.rootfs_path / "extracted"
 
+        logger.debug("Extracting tar to: %s", extract_path)
         if debug:
             print(f"      [DEBUG] Extracting tar to: {extract_path}")
 
         try:
-            # Clean existing extraction
             if extract_path.exists():
+                logger.debug("Cleaning existing extraction...")
                 if debug:
                     print("      [DEBUG] Cleaning existing extraction...")
                 shutil.rmtree(extract_path, ignore_errors=True)
             extract_path.mkdir(parents=True)
 
+            logger.debug("Extracting tar file: %s", tar_path)
             if debug:
                 print(f"      [DEBUG] Extracting tar file: {tar_path}")
 
@@ -583,26 +608,22 @@ class ImageAnalyzer:
             # tar may return non-zero for minor issues but still extract most files
             # We check if extraction actually produced files
             if extract_path.exists():
-                # Fix permissions to allow reading and deletion
-                # chmod -R u+rwX adds read, write, and execute (for dirs) for owner
+                logger.debug("Fixing permissions on extracted files...")
                 if debug:
                     print("      [DEBUG] Fixing permissions on extracted files...")
 
                 chmod_cmd = ["chmod", "-R", "u+rwX", str(extract_path)]
                 self._run_command(chmod_cmd, timeout=120, debug=debug)
 
-                # Also remove any ACL restrictions that might prevent deletion
-                # setfacl -R -b removes all ACLs
                 setfacl_cmd = ["setfacl", "-R", "-b", str(extract_path)]
                 self._run_command(setfacl_cmd, timeout=120, debug=debug)
 
-                # Count extracted items
                 file_count = sum(1 for _ in extract_path.rglob("*"))
+                logger.debug("Extraction complete: %d items in %s", file_count, extract_path)
                 if debug:
                     print(f"      [DEBUG] Extraction complete: {file_count} items in {extract_path}")
 
                 if file_count > 0:
-                    # Show first few items
                     if debug:
                         items = list(extract_path.iterdir())[:10]
                         print(f"      [DEBUG] Top-level items: {[i.name for i in items]}")
@@ -613,6 +634,7 @@ class ImageAnalyzer:
                 return False, f"Extract path not created: {extract_path}"
 
         except Exception as e:
+            logger.debug("Extract error: %s", e)
             if debug:
                 print(f"      [DEBUG] Extract error: {e}")
             return False, f"Failed to extract tar: {e}"
@@ -1016,9 +1038,9 @@ class ImageAnalyzer:
             keep_image: If True, don't remove the image
             debug: Enable debug output
         """
-        # Clean rootfs
         extract_path = self.rootfs_path / "extracted"
         if extract_path.exists():
+            logger.debug("Cleaning up extracted files: %s", extract_path)
             if debug:
                 print(f"      [DEBUG] Cleaning up extracted files: {extract_path}")
 
@@ -1035,20 +1057,21 @@ class ImageAnalyzer:
             try:
                 shutil.rmtree(extract_path)
             except Exception as e:
+                logger.debug("shutil.rmtree failed: %s, trying rm -rf", e)
                 if debug:
                     print(f"      [DEBUG] shutil.rmtree failed: {e}, trying rm -rf")
-                # Fallback to rm -rf
                 self._run_command(["rm", "-rf", str(extract_path)], timeout=120)
 
         tar_path = self.rootfs_path / "image-rootfs.tar"
         if tar_path.exists():
+            logger.debug("Removing tar file: %s", tar_path)
             if debug:
                 print(f"      [DEBUG] Removing tar file: {tar_path}")
             with contextlib.suppress(Exception):
                 tar_path.unlink()
 
-        # Remove image
         if not keep_image:
+            logger.debug("Removing image: %s...", image_name[:50])
             if debug:
                 print(f"      [DEBUG] Removing image: {image_name[:50]}...")
             self._run_command(["podman", "rmi", "-f", image_name])
@@ -1078,18 +1101,22 @@ class ImageAnalyzer:
         Returns:
             ImageAnalysisResult with found binaries and versions
         """
-        # Check if already analyzed (use image_name as key if no image_id)
         cache_key = image_id if image_id else image_name
         if cache_key in self._analyzed_images:
+            logger.debug("Using cached result for %s...", image_name[:50])
             if debug:
                 print(f"      [DEBUG] Using cached result for {image_name[:50]}...")
             return self._analyzed_images[cache_key]
 
         result = ImageAnalysisResult(image_name=image_name, image_id=image_id)
 
-        # Resolve the name podman will actually use (may differ for internal registry images)
         podman_image = self._rewrite_internal_registry(image_name)
 
+        logger.debug("rootfs_base: %s", self.rootfs_base)
+        logger.debug("rootfs_path: %s", self.rootfs_path)
+        logger.debug("rootfs_path exists: %s", self.rootfs_path.exists())
+        if podman_image != image_name:
+            logger.debug("Using rewritten image for podman: %s", podman_image)
         if debug:
             print(f"      [DEBUG] rootfs_base: {self.rootfs_base}")
             print(f"      [DEBUG] rootfs_path: {self.rootfs_path}")
@@ -1098,37 +1125,42 @@ class ImageAnalyzer:
                 print(f"      [DEBUG] Using rewritten image for podman: {podman_image}")
 
         try:
+            logger.debug("Pulling image: %s...", image_name[:80])
             print(f"    Pulling image: {image_name[:80]}...")
 
-            # Pull image
             success, error = self._pull_image(image_name, debug=debug)
             if not success:
                 result.error = error
+                logger.debug("Pull failed: %s", error[:300])
                 print(f"    ✗ Pull failed: {error[:300]}")
                 return result
 
+            logger.debug("Exporting container filesystem...")
             print("    Exporting container filesystem...")
 
-            # Create and export container
             success, tar_path, error = self._create_and_export_container(podman_image, debug=debug)
             if not success:
                 result.error = error
+                logger.debug("Export failed: %s", error[:300])
                 print(f"    ✗ Export failed: {error[:300]}")
                 self._cleanup(podman_image, debug=debug)
                 return result
 
+            logger.debug("Extracting filesystem...")
             print("    Extracting filesystem...")
 
-            # Extract tar
             success, error = self._extract_tar(tar_path, debug=debug)
             if not success:
                 result.error = error
+                logger.debug("Extract failed: %s", error[:300])
                 print(f"    ✗ Extract failed: {error[:300]}")
                 self._cleanup(podman_image, debug=debug)
                 return result
 
             extract_path = self.rootfs_path / "extracted"
 
+            logger.debug("extract_path: %s", extract_path)
+            logger.debug("extract_path exists: %s", extract_path.exists())
             if debug:
                 print(f"      [DEBUG] extract_path: {extract_path}")
                 print(f"      [DEBUG] extract_path exists: {extract_path.exists()}")
@@ -1136,7 +1168,7 @@ class ImageAnalyzer:
                     items = list(extract_path.iterdir())[:5]
                     print(f"      [DEBUG] First items: {[str(i.name) for i in items]}")
 
-            # Find Java binaries
+            logger.debug("Searching for Java binaries...")
             print("    Searching for Java binaries...")
             java_paths = self._find_binaries(extract_path, self.JAVA_BINARY_PATTERN)
 
@@ -1146,19 +1178,17 @@ class ImageAnalyzer:
                 rel_path = os.path.relpath(java_path, extract_path)
                 container_path = f"/{rel_path}"
 
-                # Skip paths that are not real binaries
                 if self._is_excluded_path(container_path):
+                    logger.debug("Skipping excluded path: %s", container_path)
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
 
-                # Skip if we already checked a binary with this resolved path
                 resolved = os.path.realpath(java_path)
                 if resolved in java_checked:
                     continue
                 java_checked.add(resolved)
 
-                # Run version check inside container
                 version, output, runtime_type = self._get_java_version_in_container(
                     podman_image, container_path, debug=debug
                 )
@@ -1174,23 +1204,21 @@ class ImageAnalyzer:
                     )
                 )
 
-            # Find Node binaries
+            logger.debug("Searching for Node.js binaries...")
             print("    Searching for Node.js binaries...")
             node_paths = self._find_binaries(extract_path, self.NODE_BINARY_PATTERN)
 
-            # Deduplicate - only check unique binaries
             node_checked = set()
             for node_path in node_paths:
                 rel_path = os.path.relpath(node_path, extract_path)
                 container_path = f"/{rel_path}"
 
-                # Skip paths that are not real binaries
                 if self._is_excluded_path(container_path):
+                    logger.debug("Skipping excluded path: %s", container_path)
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
 
-                # Skip if we already checked a binary with this resolved path
                 resolved = os.path.realpath(node_path)
                 if resolved in node_checked:
                     continue
@@ -1210,23 +1238,21 @@ class ImageAnalyzer:
                     )
                 )
 
-            # Find .NET binaries
+            logger.debug("Searching for .NET binaries...")
             print("    Searching for .NET binaries...")
             dotnet_paths = self._find_binaries(extract_path, self.DOTNET_BINARY_PATTERN)
 
-            # Deduplicate - only check unique binaries
             dotnet_checked = set()
             for dotnet_path in dotnet_paths:
                 rel_path = os.path.relpath(dotnet_path, extract_path)
                 container_path = f"/{rel_path}"
 
-                # Skip paths that are not real binaries
                 if self._is_excluded_path(container_path):
+                    logger.debug("Skipping excluded path: %s", container_path)
                     if debug:
                         print(f"      [DEBUG] Skipping excluded path: {container_path}")
                     continue
 
-                # Skip if we already checked a binary with this resolved path
                 resolved = os.path.realpath(dotnet_path)
                 if resolved in dotnet_checked:
                     continue
@@ -1246,8 +1272,8 @@ class ImageAnalyzer:
                     )
                 )
 
-            # Deep scan: heuristic cgroup v1 detection
             if self.deep_scan:
+                logger.debug("Running deep-scan for cgroup v1 references...")
                 print("    Running deep-scan for cgroup v1 references...")
                 entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
                 from .deep_scan import run_deep_scan
@@ -1263,38 +1289,52 @@ class ImageAnalyzer:
                 result.deep_scan_v2_aware_flag = v2_aware
                 result.deep_scan_go_cgroup_libs_list = go_libs
 
-            # Report findings
             if result.java_binaries:
                 for b in result.java_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
+                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    logger.debug("Java (%s): %s at %s — %s", b.runtime_type, b.version, b.path, compat_word)
                     print(f"      {compat} Java ({b.runtime_type}): {b.version} at {b.path}")
 
             if result.node_binaries:
                 for b in result.node_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
+                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    logger.debug("Node.js: %s at %s — %s", b.version, b.path, compat_word)
                     print(f"      {compat} Node.js: {b.version} at {b.path}")
 
             if result.dotnet_binaries:
                 for b in result.dotnet_binaries:
                     compat = "?" if b.is_compatible is None else ("✓" if b.is_compatible else "✗")
+                    compat_word = "unknown" if b.is_compatible is None else ("compatible" if b.is_compatible else "incompatible")
+                    logger.debug(".NET: %s at %s — %s", b.version, b.path, compat_word)
                     print(f"      {compat} .NET: {b.version} at {b.path}")
 
             if self.deep_scan and result.deep_scan_matches:
                 v2_note = " (v2-aware)" if result.deep_scan_v2_aware_flag else ""
+                logger.debug(
+                    "Deep-scan: %d cgroup v1 reference(s) found%s",
+                    len(result.deep_scan_matches), v2_note,
+                )
                 print(f"      ⚠ Deep-scan: {len(result.deep_scan_matches)} cgroup v1 reference(s) found{v2_note}")
                 sources = dict.fromkeys(m.source for m in result.deep_scan_matches)
                 for src in sources:
                     src_matches = [m for m in result.deep_scan_matches if m.source == src]
                     patterns_str = ", ".join(dict.fromkeys(m.pattern for m in src_matches))
+                    logger.debug("  [%s] %s: %s", src_matches[0].confidence, src, patterns_str)
                     print(f"        [{src_matches[0].confidence}] {src}: {patterns_str}")
                 if result.deep_scan_go_cgroup_libs_list:
+                    logger.debug("Go cgroup libraries: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
                     print(f"      📦 Go cgroup libraries: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
             elif self.deep_scan:
+                logger.debug("Deep-scan: no cgroup v1 references found")
                 print("      ✓ Deep-scan: no cgroup v1 references found")
                 if result.deep_scan_go_cgroup_libs_list:
+                    logger.debug("Go cgroup libraries detected: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
                     print(f"      📦 Go cgroup libraries detected: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
+                logger.debug("No Java, Node.js, or .NET binaries found")
                 print("      No Java, Node.js, or .NET binaries found")
 
         except Exception as e:

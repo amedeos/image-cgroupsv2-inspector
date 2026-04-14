@@ -3,8 +3,11 @@ System Checks Module
 Verifies system requirements for the image inspector tool.
 """
 
+import logging
 import shutil
 import subprocess
+
+logger = logging.getLogger(__name__)
 
 
 def check_podman_installed() -> tuple[bool, str]:
@@ -100,30 +103,35 @@ def run_system_checks(verbose: bool = False, deep_scan: bool = False) -> bool:
     Returns:
         True if all checks pass, False otherwise.
     """
+    logger.debug("Running system checks...")
     print("\n🔍 Running system checks...")
     all_passed = True
 
-    # Check podman
     podman_installed, msg = check_podman_installed()
     if podman_installed:
+        logger.debug("Podman check passed: %s", msg)
         print(f"✓ {msg}")
 
         if verbose:
             podman_running, run_msg = check_podman_running()
             if podman_running:
+                logger.debug("Podman functional: %s", run_msg)
                 print(f"✓ {run_msg}")
             else:
+                logger.debug("Podman not functional: %s", run_msg)
                 print(f"⚠ {run_msg}")
     else:
+        logger.debug("Podman check failed: %s", msg)
         print(f"✗ {msg}")
         all_passed = False
 
-    # Check strings (only needed for --deep-scan)
     if deep_scan:
         strings_installed, msg = check_strings_installed()
         if strings_installed:
+            logger.debug("Strings check passed: %s", msg)
             print(f"✓ {msg}")
         else:
+            logger.debug("Strings check failed: %s", msg)
             print(f"✗ {msg}")
             all_passed = False
 

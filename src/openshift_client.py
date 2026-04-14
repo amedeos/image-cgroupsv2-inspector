@@ -5,6 +5,7 @@ Handles connection to OpenShift cluster via API URL and token.
 
 import base64
 import json
+import logging
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,8 @@ from dotenv import load_dotenv, set_key
 from kubernetes import client
 from kubernetes.client import ApiClient, Configuration
 from kubernetes.client.rest import ApiException
+
+logger = logging.getLogger(__name__)
 
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -111,17 +114,16 @@ class OpenShiftClient:
         try:
             version_api = client.VersionApi(self._api_client)
             version_info = version_api.get_code()
+            logger.debug("Connected to OpenShift cluster")
+            logger.debug("Kubernetes version: %s", version_info.git_version)
             print("✓ Connected to OpenShift cluster")
             print(f"  Kubernetes version: {version_info.git_version}")
 
-            # Extract and store cluster name
             self._cluster_name = self._extract_cluster_name()
+            logger.debug("Cluster name: %s", self._cluster_name)
             print(f"  Cluster name: {self._cluster_name}")
 
-            # Save credentials to .env file
             self._save_to_env()
-
-            # Download and save pull-secret
             self._download_pull_secret()
 
             return True
@@ -139,6 +141,7 @@ class OpenShiftClient:
         # Save credentials
         set_key(str(self.env_file), "OPENSHIFT_API_URL", self.api_url)
         set_key(str(self.env_file), "OPENSHIFT_TOKEN", self.token)
+        logger.debug("Credentials saved to %s", self.env_file)
         print(f"✓ Credentials saved to {self.env_file}")
 
     def _download_pull_secret(self) -> bool:
@@ -153,6 +156,7 @@ class OpenShiftClient:
             True if successful, False otherwise.
         """
         if self.pull_secret_file.exists():
+            logger.debug("Pull secret already exists at %s, skipping download", self.pull_secret_file)
             print(f"✓ Pull secret already exists at {self.pull_secret_file}, skipping download")
             return True
 
@@ -178,21 +182,27 @@ class OpenShiftClient:
                 # Set restrictive permissions (readable only by owner)
                 os.chmod(self.pull_secret_file, 0o600)
 
+                logger.debug("Pull secret saved to %s", self.pull_secret_file)
                 print(f"✓ Pull secret saved to {self.pull_secret_file}")
                 return True
             else:
+                logger.debug("Pull secret found but no .dockerconfigjson data")
                 print("⚠ Pull secret found but no .dockerconfigjson data")
                 return False
 
         except ApiException as e:
             if e.status == 403:
+                logger.debug("No permission to read pull-secret (requires cluster-admin)")
                 print("⚠ No permission to read pull-secret (requires cluster-admin)")
             elif e.status == 404:
+                logger.debug("Pull secret not found in openshift-config namespace")
                 print("⚠ Pull secret not found in openshift-config namespace")
             else:
+                logger.debug("Failed to download pull-secret: %s", e.reason)
                 print(f"⚠ Failed to download pull-secret: {e.reason}")
             return False
         except Exception as e:
+            logger.debug("Error downloading pull-secret: %s", e)
             print(f"⚠ Error downloading pull-secret: {e}")
             return False
 
@@ -248,16 +258,21 @@ class OpenShiftClient:
             )
             host = route.get("spec", {}).get("host", "")
             if host:
+                logger.debug("Internal registry route: %s", host)
                 print(f"✓ Internal registry route: {host}")
                 return host
         except ApiException as e:
             if e.status == 404:
+                logger.debug("Internal registry default-route not found (not exposed)")
                 print("⚠ Internal registry default-route not found (not exposed)")
             elif e.status == 403:
+                logger.debug("No permission to read internal registry route")
                 print("⚠ No permission to read internal registry route")
             else:
+                logger.debug("Error querying internal registry route: %s", e.reason)
                 print(f"⚠ Error querying internal registry route: {e.reason}")
         except Exception as e:
+            logger.debug("Error querying internal registry route: %s", e)
             print(f"⚠ Error querying internal registry route: {e}")
         return None
 
@@ -266,4 +281,5 @@ class OpenShiftClient:
         if self._api_client:
             self._api_client.close()
             self._api_client = None
+            logger.debug("Disconnected from OpenShift cluster")
             print("✓ Disconnected from OpenShift cluster")
