@@ -84,7 +84,6 @@ class AnalysisOrchestrator:
         images: list[dict],
         csv_filepath: str | None = None,
         debug: bool = False,
-        logger: logging.Logger | None = None,
     ) -> tuple[int, str | None, list[str]]:
         """Analyze images and save CSV incrementally.
 
@@ -103,7 +102,6 @@ class AnalysisOrchestrator:
             csv_filepath: Path for incremental CSV saving.
                 If None, no CSV is written (results only in dicts).
             debug: Enable debug output.
-            logger: Optional logger for file logging.
 
         Returns:
             Tuple of (images_analyzed_count, csv_filepath or None,

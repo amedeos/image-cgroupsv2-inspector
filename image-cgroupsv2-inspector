@@ -38,6 +38,8 @@ from src.rootfs_manager import RootFSManager
 from src.scan_state import ScanState
 from src.system_checks import run_system_checks
 
+logger = logging.getLogger("image-cgroupsv2-inspector")
+
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -320,9 +322,10 @@ def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Lo
     """
     Set up logging configuration.
 
-    The file handler always logs at DEBUG level so the log file captures
-    the same detail as ``-v`` stdout output.  The ``-v`` flag only controls
-    whether a StreamHandler is attached for console output.
+    The file handler is attached to the **root** logger so that every
+    module using ``logging.getLogger(__name__)`` automatically inherits
+    it via propagation.  The file handler always logs at DEBUG level so
+    the log file captures the same detail as ``-v`` stdout output.
 
     Args:
         log_to_file: Whether to enable file logging.
@@ -330,24 +333,27 @@ def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Lo
         verbose: Whether to enable verbose (DEBUG) logging to stdout.
 
     Returns:
-        Configured logger instance.
+        Configured logger instance for the CLI script.
     """
-    logger = logging.getLogger("image-cgroupsv2-inspector")
-    logger.setLevel(logging.DEBUG)
-
-    file_format = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(module)s.%(funcName)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
 
     if log_to_file:
+        file_format = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(name)s.%(funcName)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
         file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(file_format)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
         print(f"📝 Logging to file: {log_file}")
 
-    return logger
+    # Silence noisy third-party loggers that would flood the log file
+    for name in ("urllib3", "kubernetes", "requests", "chardet", "charset_normalizer"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    return logging.getLogger("image-cgroupsv2-inspector")
 
 
 def print_banner():
@@ -362,40 +368,36 @@ def print_banner():
     print(banner)
 
 
-def setup_rootfs(rootfs_path: str, logger: logging.Logger | None = None, skip_disk_check: bool = False) -> bool:
+def setup_rootfs(rootfs_path: str, skip_disk_check: bool = False) -> bool:
     """
     Set up the rootfs directory with proper permissions and ACLs.
 
     Args:
         rootfs_path: Path where rootfs directory will be created.
-        logger: Logger instance for file logging.
         skip_disk_check: If True, insufficient disk space produces a
             warning instead of a fatal error.
 
     Returns:
         True if successful, False otherwise.
     """
-    _log = logger or logging.getLogger("image-cgroupsv2-inspector")
     print(f"\n🔧 Setting up rootfs directory at: {rootfs_path}")
-    _log.info("Setting up rootfs directory at: %s", rootfs_path)
+    logger.info("Setting up rootfs directory at: %s", rootfs_path)
 
     manager = RootFSManager(rootfs_path)
 
     success, msg = manager.create_rootfs_directory(skip_disk_check=skip_disk_check)
     if not success:
         print(f"✗ Failed to create rootfs: {msg}")
-        _log.error("Failed to create rootfs: %s", msg)
+        logger.error("Failed to create rootfs: %s", msg)
         return False
 
     print(f"\n✓ {msg}")
-    _log.info("Rootfs setup successful: %s", msg)
+    logger.info("Rootfs setup successful: %s", msg)
     return True
 
 
 def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None = None) -> None:
     """Print analysis summary from image record dicts."""
-    _log = logging.getLogger("image-cgroupsv2-inspector")
-
     java_found = sum(1 for img in images if img.get("java_binary", "None") != "None")
     node_found = sum(1 for img in images if img.get("node_binary", "None") != "None")
     dotnet_found = sum(1 for img in images if img.get("dotnet_binary", "None") != "None")
@@ -409,7 +411,7 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
     dotnet_incompat = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "No")
     dotnet_unknown = sum(1 for img in images if img.get("dotnet_cgroup_v2_compatible") == "Unknown")
 
-    _log.debug("Analysis Results: Java found=%d (compat=%d, incompat=%d, unknown=%d), "
+    logger.debug("Analysis Results: Java found=%d (compat=%d, incompat=%d, unknown=%d), "
                "Node.js found=%d (compat=%d, incompat=%d, unknown=%d), "
                ".NET found=%d (compat=%d, incompat=%d, unknown=%d)",
                java_found, java_compat, java_incompat, java_unknown,
@@ -438,7 +440,7 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
     deep_scan_found = sum(1 for img in images if img.get("deep_scan_match") == "true")
     if deep_scan_found > 0 or any(img.get("deep_scan_match") != "" for img in images):
         print(f"      Deep-scan matches: {deep_scan_found} images with cgroup v1 references")
-        _log.debug("Deep-scan matches: %d images with cgroup v1 references", deep_scan_found)
+        logger.debug("Deep-scan matches: %d images with cgroup v1 references", deep_scan_found)
         high = sum(1 for img in images if img.get("deep_scan_confidence") == "high")
         medium = sum(1 for img in images if img.get("deep_scan_confidence") == "medium")
         low = sum(1 for img in images if img.get("deep_scan_confidence") == "low")
@@ -448,22 +450,22 @@ def _print_analysis_summary(images: list[dict], skipped_images: list[str] | None
             print(f"        ⚠ medium confidence: {medium}")
         if low:
             print(f"        ⚠ low confidence: {low}")
-        _log.debug("Deep-scan confidence breakdown: high=%d, medium=%d, low=%d", high, medium, low)
+        logger.debug("Deep-scan confidence breakdown: high=%d, medium=%d, low=%d", high, medium, low)
         v2_aware_count = sum(1 for img in images if img.get("deep_scan_v2_aware") == "true")
         if v2_aware_count:
             print(f"        ✓ v2-aware (dual v1+v2 support): {v2_aware_count}")
         v1_only = deep_scan_found - v2_aware_count
         if v1_only > 0:
             print(f"        ✗ v1-only (likely incompatible): {v1_only}")
-        _log.debug("Deep-scan: v2-aware=%d, v1-only=%d", v2_aware_count, v1_only)
+        logger.debug("Deep-scan: v2-aware=%d, v1-only=%d", v2_aware_count, v1_only)
         go_libs_count = sum(
             1 for img in images if img.get("deep_scan_go_cgroup_libs", "") != ""
         )
         if go_libs_count:
-            _log.debug("Go cgroup libraries detected in %d images", go_libs_count)
+            logger.debug("Go cgroup libraries detected in %d images", go_libs_count)
             print(f"        📦 Go cgroup libraries detected: {go_libs_count} images")
     skipped_count = len(skipped_images) if skipped_images else 0
-    _log.debug("Images skipped (timeout): %d", skipped_count)
+    logger.debug("Images skipped (timeout): %d", skipped_count)
     print(f"      Images skipped (timeout): {skipped_count}")
 
 
@@ -496,10 +498,9 @@ def main() -> int:
     # Resolve state directory early (default = output dir)
     state_dir = args.state_dir if args.state_dir else args.output_dir
 
-    # Set up logging
     # If --log-file is specified with a non-default value, imply --log-to-file
     log_to_file = args.log_to_file or args.log_file != "image-cgroupsv2-inspector.log"
-    logger = setup_logging(log_to_file, args.log_file, args.verbose)
+    setup_logging(log_to_file, args.log_file, args.verbose)
 
     logger.info("=" * 60)
     logger.info("image-cgroupsv2-inspector started")
@@ -521,7 +522,7 @@ def main() -> int:
 
     # Handle rootfs path if provided
     if args.rootfs_path:
-        if not setup_rootfs(args.rootfs_path, logger, skip_disk_check=args.skip_disk_check):
+        if not setup_rootfs(args.rootfs_path, skip_disk_check=args.skip_disk_check):
             return 1
 
         if args.skip_collection:
@@ -662,7 +663,6 @@ def main() -> int:
                     images=images,
                     csv_filepath=csv_filepath,
                     debug=args.verbose,
-                    logger=logger,
                 )
                 logger.info("Image analysis completed")
             else:
@@ -822,7 +822,6 @@ def main() -> int:
                 images=image_dicts,
                 csv_filepath=csv_filepath,
                 debug=args.verbose,
-                logger=logger,
             )
             logger.info("Image analysis completed")
         else:
