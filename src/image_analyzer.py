@@ -148,13 +148,19 @@ class ImageAnalysisResult:
         """Return compatibility status for Go."""
         if not self.go_binaries:
             return "N/A"
-        if any(b.is_compatible is None for b in self.go_binaries):
+        has_needs_review = any(
+            b.is_compatible is None and "needs review" in b.compliance_reason for b in self.go_binaries
+        )
+        has_unknown = any(
+            b.is_compatible is None and "needs review" not in b.compliance_reason for b in self.go_binaries
+        )
+        if has_unknown:
             return "Unknown"
+        if has_needs_review:
+            return "Needs Review"
         compatible = all(b.is_compatible for b in self.go_binaries)
         if compatible:
             return "Yes"
-        if any(b.is_compatible for b in self.go_binaries):
-            return "Needs Review"
         return "No"
 
     @property

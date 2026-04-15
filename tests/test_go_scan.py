@@ -218,7 +218,7 @@ class TestImageAnalysisResultGoProperties:
         )
         assert result.go_compatible == "No"
 
-    def test_unknown_compatibility(self):
+    def test_needs_review_compatibility(self):
         result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
         result.go_binaries.append(
             GoBinaryInfo(
@@ -227,6 +227,18 @@ class TestImageAnalysisResultGoProperties:
                 modules={"go.uber.org/automaxprocs": "v1.4.0"},
                 is_compatible=None,
                 compliance_reason="needs review",
+            )
+        )
+        assert result.go_compatible == "Needs Review"
+
+    def test_unknown_compatibility(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
+        result.go_binaries.append(
+            GoBinaryInfo(
+                path="/usr/bin/weird",
+                go_version="goXYZ",
+                is_compatible=None,
+                compliance_reason="Cannot parse Go version: goXYZ",
             )
         )
         assert result.go_compatible == "Unknown"
@@ -247,6 +259,27 @@ class TestImageAnalysisResultGoProperties:
                 go_version="go1.16",
                 is_compatible=False,
                 compliance_reason="no v2",
+            )
+        )
+        assert result.go_compatible == "No"
+
+    def test_mixed_compatible_and_needs_review(self):
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
+        result.go_binaries.append(
+            GoBinaryInfo(
+                path="/usr/bin/new",
+                go_version="go1.22",
+                is_compatible=True,
+                compliance_reason="native",
+            )
+        )
+        result.go_binaries.append(
+            GoBinaryInfo(
+                path="/usr/bin/old",
+                go_version="go1.18",
+                modules={"go.uber.org/automaxprocs": "v1.4.0"},
+                is_compatible=None,
+                compliance_reason="automaxprocs v1.4.0 < v1.5.0: needs review",
             )
         )
         assert result.go_compatible == "Needs Review"
