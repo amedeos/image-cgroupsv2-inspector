@@ -911,6 +911,13 @@ The setup script also builds and pushes **deep-scan test images** for heuristic 
 | `deep-scan-node-exporter` | Upstream (node-exporter v1.3.1) | Go binary, cgroup v1 positive control |
 | `deep-scan-nginx-negative` | Upstream (nginx 1.25-alpine) | Negative control — no cgroup references expected |
 | `deep-scan-redis-negative` | Upstream (redis 7-alpine) | Negative control — no cgroup references expected |
+| `deep-scan-go-v2-compliant-runtime` | Custom build | Go 1.22, no cgroup libs (expects: v2_compliant — Go runtime >= 1.19) |
+| `deep-scan-go-v2-compliant-automaxprocs` | Custom build | Go 1.22 + automaxprocs v1.6.0 (expects: v2_compliant — double confirmation) |
+| `deep-scan-go-v2-compliant-lib-only` | Custom build | Go 1.18 + automaxprocs v1.5.1 (expects: v2_compliant — library covers v2) |
+| `deep-scan-go-v2-needs-review` | Custom build | Go 1.18 + automaxprocs v1.4.0 (expects: needs_review — pre-v2 library) |
+| `deep-scan-go-v2-unaware` | Custom build | Go 1.18, no cgroup libs (expects: v2_unaware) |
+| `deep-scan-c-binary-no-go` | Custom build | C binary, no Go (expects: no Go compliance detection triggered) |
+| `deep-scan-go-v2-compliant-combo` | Custom build | Go 1.22 + automaxprocs v1.6.0 + automemlimit v0.7.0 (expects: v2_compliant — multi-library combo) |
 
 Custom images are built from Containerfiles in `manifests/quay/deep-scan-images/`.
 
@@ -1014,7 +1021,14 @@ image-cgroupsv2-inspector/
             ├── entrypoint-cgv1/
             ├── source-cgv1/
             ├── binary-cgv1/
-            └── exec-cgv1/
+            ├── exec-cgv1/
+            ├── go-v2-compliant-runtime/       # Go v2 compliance test images
+            ├── go-v2-compliant-automaxprocs/
+            ├── go-v2-compliant-lib-only/
+            ├── go-v2-needs-review/
+            ├── go-v2-unaware/
+            ├── c-binary-no-go/
+            └── go-v2-compliant-combo/
 ```
 
 ## Development

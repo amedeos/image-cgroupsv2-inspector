@@ -77,6 +77,7 @@ TEST_REPOS=(
     deep-scan-go-v2-needs-review
     deep-scan-go-v2-unaware
     deep-scan-c-binary-no-go
+    deep-scan-go-v2-compliant-combo
 )
 
 # ---------------------------------------------------------------------------

@@ -533,6 +533,14 @@ push_test_images() {
     podman rmi "deep-scan-c-binary-no-go:latest" 2>/dev/null || true
     echo ""
 
+    # --- Case 7: Go>=1.19 + automaxprocs + automemlimit → v2_compliant (combo) ---
+    info "=== deep-scan-go-v2-compliant-combo (Go 1.22 + automaxprocs v1.6.0 + automemlimit v0.7.0) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-compliant-combo" \
+        "Containerfile" "deep-scan-go-v2-compliant-combo" "latest" || true
+    add_tag "deep-scan-go-v2-compliant-combo" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-compliant-combo:latest" 2>/dev/null || true
+    echo ""
+
     # --- deep-scan-cadvisor (upstream, cgroup v1 positive) ---
     info "=== deep-scan-cadvisor (cAdvisor v0.44.0, cgroup v1 positive) ==="
     pull_tag_push "gcr.io/cadvisor/cadvisor:v0.44.0" \
