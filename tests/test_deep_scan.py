@@ -11,17 +11,23 @@ from src.deep_scan import (
     CGROUPV2_FILE_NAMES,
     CGROUPV2_REGEX,
     GO_CGROUP_PACKAGES,
+    _extract_go_dep_versions,
     _extract_sourced_paths,
+    _find_v2_awareness_indicators,
     _is_elf_binary,
+    _is_go_binary,
     _is_shell_script,
     _resolve_script_in_rootfs,
     _run_strings,
+    detect_go_v2_compliance,
+    determine_v2_compliance,
     find_cgroupv1_patterns,
     find_cgroupv2_patterns,
     find_go_cgroup_deps,
     run_deep_scan,
     scan_binary_strings,
     scan_entrypoint_scripts,
+    semver_gte,
 )
 
 
@@ -663,7 +669,7 @@ MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
 """,
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -674,7 +680,7 @@ exec "$@"
         assert v2_aware is False
 
     def test_without_entrypoint(self, tmp_path):
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=None,
@@ -695,7 +701,7 @@ else
 fi
 """,
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -706,7 +712,7 @@ fi
 
     def test_debug_does_not_crash(self, tmp_path):
         """Debug mode should not raise exceptions."""
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             debug=True,
@@ -791,7 +797,7 @@ class TestScanBinaryStrings:
                 "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
             ],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
+        matches, v2_aware, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert all(m.confidence == "low" for m in matches)
         assert all(m.source.startswith("binary:") for m in matches)
@@ -807,7 +813,7 @@ class TestScanBinaryStrings:
                 "memory.max_is_a_long_enough_string",
             ],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
+        matches, v2_aware, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
@@ -816,19 +822,19 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "cleanapp",
             ["just_some_random_long_string_here", "another_normal_string_data"],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/cleanapp"], debug=False)
+        matches, v2_aware, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/cleanapp"], debug=False)
         assert matches == []
         assert v2_aware is False
 
     def test_nonexistent_binary_skipped(self, tmp_path):
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/nonexistent"], debug=False)
+        matches, _, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/nonexistent"], debug=False)
         assert matches == []
 
     def test_shell_script_skipped(self, tmp_path):
         script = tmp_path / "usr" / "bin" / "run.sh"
         script.parent.mkdir(parents=True)
         script.write_text("#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes")
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/run.sh"], debug=False)
+        matches, _, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/run.sh"], debug=False)
         assert matches == []
 
     def test_multiple_binaries(self, tmp_path):
@@ -840,7 +846,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "app2",
             ["/sys/fs/cgroup/cpu/cpu.cfs_quota_us"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
+        matches, _, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
         assert len(matches) >= 2
         sources = {m.source for m in matches}
         assert "binary:/usr/bin/app1" in sources
@@ -851,7 +857,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False)
+        matches, _, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False)
         pattern_count = sum(1 for m in matches if m.pattern == "memory.limit_in_bytes")
         assert pattern_count == 1
 
@@ -861,7 +867,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "local" / "bin" / "cgroup-reader",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False)
+        matches, _, _, _, _, _ = scan_binary_strings(tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False)
         assert len(matches) > 0
         assert matches[0].source == "binary:/usr/local/bin/cgroup-reader"
 
@@ -892,7 +898,7 @@ class TestRunDeepScanWithBinary:
                 "/sys/fs/cgroup/cpuacct/cpuacct.usage",
             ],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="cadvisor:v0.44.0",
             entrypoint=["/usr/bin/cadvisor"],
@@ -911,7 +917,7 @@ MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
 """,
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -931,7 +937,7 @@ exec "$@"
                 "memory.max_and_some_padding",
             ],
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="monitor:latest",
             entrypoint=["/usr/bin/monitor"],
@@ -953,7 +959,7 @@ exec "$@"
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/wrapper.sh"],
@@ -970,7 +976,7 @@ exec "$@"
             tmp_path / "usr" / "bin" / "nginx",
             ["welcome_to_nginx_server", "http_proxy_module_loaded"],
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="nginx:latest",
             entrypoint=["/usr/bin/nginx"],
@@ -995,7 +1001,7 @@ exec /usr/local/bin/myapp
                 "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
             ],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1018,7 +1024,7 @@ exec /usr/local/bin/myapp
             tmp_path / "usr" / "local" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1050,7 +1056,7 @@ echo hello
 exec "$@"
 """,
         )
-        matches, _, _ = run_deep_scan(
+        matches, _, _, _, _, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1151,7 +1157,7 @@ class TestScanBinaryStringsGoDeps:
                 "net/http.ListenAndServe",
             ],
         )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
+        _, _, go_libs, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
         assert "github.com/prometheus/procfs" in go_libs
 
     def test_go_deps_without_v1_patterns(self, tmp_path):
@@ -1163,7 +1169,7 @@ class TestScanBinaryStringsGoDeps:
                 "just_some_normal_long_text_here",
             ],
         )
-        matches, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
+        matches, _, go_libs, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
         assert matches == []
         assert "github.com/prometheus/procfs" in go_libs
 
@@ -1177,7 +1183,7 @@ class TestScanBinaryStringsGoDeps:
                 "github.com/opencontainers/runc/libcontainer/cgroups",
             ],
         )
-        matches, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/cadvisor"], debug=False)
+        matches, _, go_libs, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/cadvisor"], debug=False)
         assert len(matches) > 0
         assert len(go_libs) >= 2
 
@@ -1190,7 +1196,7 @@ class TestScanBinaryStringsGoDeps:
                 "libc.so.6_is_a_long_string",
             ],
         )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
+        _, _, go_libs, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert go_libs == []
 
     def test_go_deps_deduplicated_across_binaries(self, tmp_path):
@@ -1203,5 +1209,469 @@ class TestScanBinaryStringsGoDeps:
             tmp_path / "usr" / "bin" / "app2",
             ["github.com/prometheus/procfs"],
         )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
+        _, _, go_libs, _, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
         assert go_libs.count("github.com/prometheus/procfs") == 1
+
+
+class TestSemverGte:
+    """Tests for semver_gte()."""
+
+    def test_equal_versions(self):
+        assert semver_gte("v1.5.0", "v1.5.0") is True
+
+    def test_greater_patch(self):
+        assert semver_gte("v1.5.1", "v1.5.0") is True
+
+    def test_greater_minor(self):
+        assert semver_gte("v1.6.0", "v1.5.0") is True
+
+    def test_greater_major(self):
+        assert semver_gte("v2.0.0", "v1.5.0") is True
+
+    def test_lesser_patch(self):
+        assert semver_gte("v1.4.9", "v1.5.0") is False
+
+    def test_lesser_minor(self):
+        assert semver_gte("v1.4.0", "v1.5.0") is False
+
+    def test_lesser_major(self):
+        assert semver_gte("v0.9.0", "v1.0.0") is False
+
+    def test_no_v_prefix(self):
+        assert semver_gte("1.5.1", "v1.5.0") is True
+
+    def test_invalid_version_returns_false(self):
+        assert semver_gte("notaversion", "v1.0.0") is False
+
+
+class TestIsGoBinary:
+    """Tests for _is_go_binary()."""
+
+    def test_go_version_string(self):
+        assert _is_go_binary("go1.21.3\nsome other stuff") is True
+
+    def test_go_module_path(self):
+        assert _is_go_binary("some stuff\npath\tgithub.com/foo/bar\n") is True
+
+    def test_runtime_goexit(self):
+        assert _is_go_binary("runtime.goexit\n") is True
+
+    def test_not_go_binary(self):
+        assert _is_go_binary("libc.so.6\nmain\n") is False
+
+
+class TestFindV2AwarenessIndicators:
+    """Tests for _find_v2_awareness_indicators()."""
+
+    def test_finds_automaxprocs_indicators(self):
+        text = "isCGroupV2\nCGroups2\ncgroups2.go\n"
+        result = _find_v2_awareness_indicators(text)
+        assert "isCGroupV2" in result
+        assert "CGroups2" in result
+        assert "cgroups2.go" in result
+
+    def test_finds_v2_filesystem_indicators(self):
+        text = "cpu.max\nmemory.max\ncgroup.controllers\n"
+        result = _find_v2_awareness_indicators(text)
+        assert "cpu.max" in result
+        assert "memory.max" in result
+        assert "cgroup.controllers" in result
+
+    def test_no_indicators(self):
+        text = "just some random text\nnothing here\n"
+        assert _find_v2_awareness_indicators(text) == []
+
+
+class TestExtractGoDepVersions:
+    """Tests for _extract_go_dep_versions()."""
+
+    def test_parses_dep_lines(self):
+        text = (
+            "path\tgithub.com/myapp\n"
+            "dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc123\n"
+            "dep\tgithub.com/prometheus/procfs\tv0.7.3\th1:def456\n"
+        )
+        result = _extract_go_dep_versions(text)
+        assert result["go.uber.org/automaxprocs"] == "v1.5.1"
+        assert result["github.com/prometheus/procfs"] == "v0.7.3"
+
+    def test_no_deps(self):
+        text = "just some binary strings\n"
+        assert _extract_go_dep_versions(text) == {}
+
+    def test_first_version_wins(self):
+        text = "dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc\ndep\tgo.uber.org/automaxprocs\tv1.4.0\th1:old\n"
+        result = _extract_go_dep_versions(text)
+        assert result["go.uber.org/automaxprocs"] == "v1.5.1"
+
+
+class TestDetermineV2Compliance:
+    """Tests for determine_v2_compliance()."""
+
+    def test_v2_compliant_automaxprocs(self):
+        """automaxprocs v1.5.1 with v2 indicators covers cpu.cfs_quota_us + cpu.cfs_period_us."""
+        status, note = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=["isCGroupV2", "CGroups2", "cgroups2.go"],
+            lib_versions={"go.uber.org/automaxprocs": "v1.5.1"},
+        )
+        assert status == "v2_compliant"
+        assert "automaxprocs" in note
+        assert "v1.5.1" in note
+
+    def test_v2_likely_compliant_old_automaxprocs(self):
+        """automaxprocs v1.4.0 (pre-v2) with v2 indicators → v2_likely_compliant."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=["isCGroupV2"],
+            lib_versions={"go.uber.org/automaxprocs": "v1.4.0"},
+        )
+        assert status == "v2_likely_compliant"
+
+    def test_needs_review_old_automaxprocs_no_indicators(self):
+        """automaxprocs v1.4.0 without v2 indicators → needs_review."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=[],
+            lib_versions={"go.uber.org/automaxprocs": "v1.4.0"},
+        )
+        assert status == "needs_review"
+
+    def test_v2_unaware_no_libs(self):
+        """No Go cgroup libraries at all → v2_unaware."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["memory.limit_in_bytes"],
+            go_libs_detected=[],
+            v2_indicators_found=[],
+            lib_versions={},
+        )
+        assert status == "v2_unaware"
+
+    def test_needs_review_unknown_lib(self):
+        """v1 patterns from a library not in GO_V2_AWARE_LIBRARIES → needs_review."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us"],
+            go_libs_detected=["github.com/unknown/cgroup-lib"],
+            v2_indicators_found=[],
+            lib_versions={},
+        )
+        assert status == "needs_review"
+
+    def test_v2_likely_compliant_with_indicators(self):
+        """v2 indicators found but uncovered patterns remain → v2_likely_compliant."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us", "memory.limit_in_bytes", "blkio.weight"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=["isCGroupV2", "CGroups2", "cgroups2.go"],
+            lib_versions={"go.uber.org/automaxprocs": "v1.5.1"},
+        )
+        assert status == "v2_likely_compliant"
+
+    def test_v2_compliant_containerd_cgroups(self):
+        """containerd/cgroups v1.0.0+ with v2 indicators covers v1 patterns."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us", "cpu.cfs_period_us", "memory.limit_in_bytes"],
+            go_libs_detected=["github.com/containerd/cgroups"],
+            v2_indicators_found=["cgroup.controllers", "cpu.max", "memory.max"],
+            lib_versions={"github.com/containerd/cgroups": "v1.1.0"},
+        )
+        assert status == "v2_compliant"
+
+    def test_no_version_detected_with_indicators(self):
+        """Library present, version unknown, v2 indicators found → v2_likely_compliant."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=["isCGroupV2"],
+            lib_versions={},
+        )
+        assert status == "v2_likely_compliant"
+
+    def test_no_version_no_indicators(self):
+        """Library present, version unknown, no v2 indicators → needs_review."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us"],
+            go_libs_detected=["go.uber.org/automaxprocs"],
+            v2_indicators_found=[],
+            lib_versions={},
+        )
+        assert status == "needs_review"
+
+    def test_procfs_does_not_cover_patterns(self):
+        """procfs has empty v1_patterns_covered — should not mark patterns as covered."""
+        status, _ = determine_v2_compliance(
+            v1_patterns_found=["cpu.cfs_quota_us"],
+            go_libs_detected=["github.com/prometheus/procfs"],
+            v2_indicators_found=[],
+            lib_versions={"github.com/prometheus/procfs": "v0.9.0"},
+        )
+        assert status == "needs_review"
+
+
+class TestDetectGoV2Compliance:
+    """Tests for detect_go_v2_compliance()."""
+
+    def test_full_detection(self):
+        strings_output = (
+            "go1.21.3\n"
+            "path\tgithub.com/myapp\n"
+            "dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc\n"
+            "dep\tgithub.com/prometheus/procfs\tv0.7.3\th1:def\n"
+            "isCGroupV2\n"
+            "CGroups2\n"
+            "cgroups2.go\n"
+            "cpu.cfs_quota_us\n"
+            "cpu.cfs_period_us\n"
+        )
+        status, note, lib_vers = detect_go_v2_compliance(
+            strings_output=strings_output,
+            v1_patterns_found=["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+            go_cgroup_libs=["go.uber.org/automaxprocs", "github.com/prometheus/procfs"],
+        )
+        assert status == "v2_compliant"
+        assert "automaxprocs" in note
+        assert lib_vers["go.uber.org/automaxprocs"] == "v1.5.1"
+
+    def test_no_v2_indicators(self):
+        strings_output = "go1.21.3\ndep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc\ncpu.cfs_quota_us\n"
+        status, _, _ = detect_go_v2_compliance(
+            strings_output=strings_output,
+            v1_patterns_found=["cpu.cfs_quota_us"],
+            go_cgroup_libs=["go.uber.org/automaxprocs"],
+        )
+        assert status == "needs_review"
+
+
+class TestScanBinaryStringsGoCompliance:
+    """Integration tests for Go v2 compliance detection in scan_binary_strings."""
+
+    def _create_go_binary(self, path, embedded_strings):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = b"\x7fELF" + b"\x00" * 100
+        for s in embedded_strings:
+            content += s.encode("utf-8") + b"\x00" * 10
+        content += b"\x00" * 100
+        path.write_bytes(content)
+
+    def test_go_binary_v2_compliant(self, tmp_path):
+        """Go binary with automaxprocs v1.5.1 and v2 indicators → v2_compliant."""
+        self._create_go_binary(
+            tmp_path / "usr" / "bin" / "hermodr-proxy",
+            [
+                "go1.21.3_some_padding_text",
+                "path\tgithub.com/myapp",
+                "dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc",
+                "dep\tgithub.com/prometheus/procfs\tv0.7.3\th1:def",
+                "go.uber.org/automaxprocs",
+                "github.com/prometheus/procfs",
+                "cpu.cfs_quota_us",
+                "cpu.cfs_period_us",
+                "isCGroupV2_padding_text",
+                "CGroups2_padding_text_here",
+                "cgroups2.go_padding_text",
+            ],
+        )
+        matches, _, _, compliance, note, lib_vers = scan_binary_strings(
+            tmp_path,
+            ["/usr/bin/hermodr-proxy"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert compliance == "v2_compliant"
+        assert "automaxprocs" in note
+        assert "v1.5.1" in note
+        assert lib_vers.get("go.uber.org/automaxprocs") == "v1.5.1"
+
+    def test_go_binary_old_automaxprocs(self, tmp_path):
+        """Go binary with automaxprocs v1.4.0 (pre-v2) with v2 indicators → v2_likely_compliant."""
+        self._create_go_binary(
+            tmp_path / "usr" / "bin" / "myapp",
+            [
+                "go1.20.0_some_padding_text",
+                "dep\tgo.uber.org/automaxprocs\tv1.4.0\th1:old",
+                "go.uber.org/automaxprocs",
+                "cpu.cfs_quota_us",
+                "cpu.cfs_period_us",
+                "isCGroupV2_padding_text",
+            ],
+        )
+        _, _, _, compliance, _, _ = scan_binary_strings(
+            tmp_path,
+            ["/usr/bin/myapp"],
+            debug=False,
+        )
+        assert compliance == "v2_likely_compliant"
+
+    def test_go_binary_no_cgroup_libs(self, tmp_path):
+        """Go binary with v1 patterns but no cgroup libs → no compliance check."""
+        self._create_go_binary(
+            tmp_path / "usr" / "bin" / "myapp",
+            [
+                "go1.20.0_some_padding_text",
+                "cpu.cfs_quota_us",
+                "runtime.goexit_padding",
+            ],
+        )
+        matches, _, go_libs, compliance, _, _ = scan_binary_strings(
+            tmp_path,
+            ["/usr/bin/myapp"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert go_libs == []
+        assert compliance == ""
+
+    def test_non_go_binary_no_compliance(self, tmp_path):
+        """Non-Go binary with v1 patterns → no compliance check."""
+        self._create_go_binary(
+            tmp_path / "usr" / "bin" / "capp",
+            [
+                "libc.so.6_padding_text",
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            ],
+        )
+        _, _, _, compliance, _, _ = scan_binary_strings(
+            tmp_path,
+            ["/usr/bin/capp"],
+            debug=False,
+        )
+        assert compliance == ""
+
+
+class TestRunDeepScanGoCompliance:
+    """Integration tests for Go compliance in run_deep_scan."""
+
+    def _create_go_binary(self, path, embedded_strings):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = b"\x7fELF" + b"\x00" * 100
+        for s in embedded_strings:
+            content += s.encode("utf-8") + b"\x00" * 10
+        content += b"\x00" * 100
+        path.write_bytes(content)
+
+    def test_deep_scan_returns_compliance(self, tmp_path):
+        """run_deep_scan returns compliance info for Go binary."""
+        self._create_go_binary(
+            tmp_path / "usr" / "bin" / "myapp",
+            [
+                "go1.21.3_some_padding_text",
+                "dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:abc",
+                "go.uber.org/automaxprocs",
+                "cpu.cfs_quota_us",
+                "cpu.cfs_period_us",
+                "isCGroupV2_padding_text",
+                "CGroups2_padding_text_here",
+                "cgroups2.go_padding_text",
+            ],
+        )
+        matches, _, _, compliance, note, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/usr/bin/myapp"],
+            debug=False,
+        )
+        assert len(matches) > 0
+        assert compliance == "v2_compliant"
+        assert "automaxprocs" in note
+
+    def test_deep_scan_no_compliance_for_scripts(self, tmp_path):
+        """Shell scripts should not trigger compliance detection."""
+        script = tmp_path / "entrypoint.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text('#!/bin/bash\nMEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)\nexec "$@"\n')
+        script.chmod(0o755)
+        _, _, _, compliance, _, _ = run_deep_scan(
+            extract_path=tmp_path,
+            image_name="test:latest",
+            entrypoint=["/entrypoint.sh"],
+            debug=False,
+        )
+        assert compliance == ""
+
+
+class TestImageAnalysisResultCompliance:
+    """Tests for compliance-aware properties on ImageAnalysisResult."""
+
+    def test_deep_scan_v2_aware_returns_compliance_status(self):
+        from src.image_analyzer import DeepScanMatch, ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_matches=[DeepScanMatch(source="binary:/app", pattern="cpu.cfs_quota_us", confidence="low")],
+            deep_scan_compliance_status="v2_compliant",
+        )
+        assert result.deep_scan_v2_aware == "v2_compliant"
+
+    def test_deep_scan_v2_aware_falls_back_to_boolean(self):
+        from src.image_analyzer import DeepScanMatch, ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_matches=[DeepScanMatch(source="/entrypoint.sh", pattern="cpu.cfs_quota_us", confidence="high")],
+            deep_scan_v2_aware_flag=True,
+        )
+        assert result.deep_scan_v2_aware == "true"
+
+    def test_deep_scan_confidence_upgraded_when_v2_compliant(self):
+        from src.image_analyzer import DeepScanMatch, ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_matches=[DeepScanMatch(source="binary:/app", pattern="cpu.cfs_quota_us", confidence="low")],
+            deep_scan_compliance_status="v2_compliant",
+        )
+        assert result.deep_scan_confidence == "high"
+
+    def test_deep_scan_confidence_not_upgraded_when_not_compliant(self):
+        from src.image_analyzer import DeepScanMatch, ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_matches=[DeepScanMatch(source="binary:/app", pattern="cpu.cfs_quota_us", confidence="low")],
+            deep_scan_compliance_status="needs_review",
+        )
+        assert result.deep_scan_confidence == "low"
+
+    def test_deep_scan_go_cgroup_libs_with_versions(self):
+        from src.image_analyzer import ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_go_cgroup_libs_list=["go.uber.org/automaxprocs", "github.com/prometheus/procfs"],
+            deep_scan_lib_versions={
+                "go.uber.org/automaxprocs": "v1.5.1",
+                "github.com/prometheus/procfs": "v0.7.3",
+            },
+        )
+        libs = result.deep_scan_go_cgroup_libs
+        assert "go.uber.org/automaxprocs v1.5.1" in libs
+        assert "github.com/prometheus/procfs v0.7.3" in libs
+
+    def test_deep_scan_go_cgroup_libs_without_versions(self):
+        from src.image_analyzer import ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_go_cgroup_libs_list=["github.com/prometheus/procfs"],
+            deep_scan_lib_versions={},
+        )
+        assert result.deep_scan_go_cgroup_libs == "github.com/prometheus/procfs"
+
+    def test_deep_scan_compliance_note_property(self):
+        from src.image_analyzer import ImageAnalysisResult
+
+        result = ImageAnalysisResult(
+            image_name="test",
+            image_id="id1",
+            deep_scan_compliance_note_text="automaxprocs v1.5.1 (>=v1.5.0): isCGroupV2+CGroups2 detected",
+        )
+        assert "automaxprocs" in result.deep_scan_compliance_note

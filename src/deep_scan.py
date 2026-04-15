@@ -217,6 +217,216 @@ def find_go_cgroup_deps(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Go cgroups v2 compliance detection
+# ---------------------------------------------------------------------------
+
+V2_AWARENESS_INDICATORS = (
+    # automaxprocs v2 detection function
+    "isCGroupV2",
+    # CGroups2 struct/type
+    "CGroups2",
+    "NewCGroups2ForCurrentProcess",
+    "newCGroups2FromMountInfo",
+    "(*CGroups2).CPUQuota",
+    # cgroups v2 filesystem files
+    "cpu.max",
+    "memory.max",
+    "cgroup.controllers",
+    # cgroups2.go source file reference
+    "cgroups2.go",
+    # containerd cgroups v2
+    "containerd/cgroups/v2",
+    "containerd/cgroups/v3",
+)
+
+GO_V2_AWARE_LIBRARIES: dict[str, dict] = {
+    "go.uber.org/automaxprocs": {
+        "min_v2_version": "v1.5.0",
+        "v1_patterns_covered": ["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+        "v2_indicators": ["isCGroupV2", "CGroups2", "cgroups2.go"],
+        "description": "GOMAXPROCS auto-tuning with cgroup v2 support",
+    },
+    "github.com/containerd/cgroups": {
+        "min_v2_version": "v1.0.0",
+        "v1_patterns_covered": [
+            "cpu.cfs_quota_us",
+            "cpu.cfs_period_us",
+            "memory.limit_in_bytes",
+            "cpuacct",
+        ],
+        "v2_indicators": ["cgroup.controllers", "cpu.max", "memory.max"],
+        "description": "containerd cgroups management library",
+    },
+    "github.com/opencontainers/runc/libcontainer/cgroups": {
+        "min_v2_version": "v1.1.0",
+        "v1_patterns_covered": [
+            "cpu.cfs_quota_us",
+            "cpu.cfs_period_us",
+            "memory.limit_in_bytes",
+            "cpuacct",
+        ],
+        "v2_indicators": ["cgroup.controllers", "cpu.max", "memory.max"],
+        "description": "runc cgroups management",
+    },
+    "github.com/prometheus/procfs": {
+        "min_v2_version": "v0.8.0",
+        "v1_patterns_covered": [],
+        "v2_indicators": [],
+        "description": "Prometheus proc filesystem reader (generally cgroup-neutral)",
+    },
+}
+
+_GO_BUILD_DEP_RE = re.compile(r"dep\t([\w./\-]+)\t(v[\d.]+)")
+
+
+def semver_gte(version_a: str, version_b: str) -> bool:
+    """Check if version_a >= version_b (simple semver, handles v-prefix)."""
+
+    def _parse(v: str) -> tuple[int, ...]:
+        v = v.lstrip("v")
+        parts = v.split(".")
+        return tuple(int(p) for p in parts[:3])
+
+    try:
+        return _parse(version_a) >= _parse(version_b)
+    except (ValueError, IndexError):
+        return False
+
+
+def _find_v2_awareness_indicators(strings_output: str) -> list[str]:
+    """Return V2_AWARENESS_INDICATORS found in *strings_output*."""
+    found: list[str] = []
+    for indicator in V2_AWARENESS_INDICATORS:
+        if indicator in strings_output:
+            found.append(indicator)
+    return found
+
+
+def _extract_go_dep_versions(strings_output: str) -> dict[str, str]:
+    """Extract Go module dependency versions from build info in strings output.
+
+    Go 1.18+ embeds build info with lines like:
+        dep\tgo.uber.org/automaxprocs\tv1.5.1\th1:...
+
+    Returns:
+        Dict mapping module path to version string.
+    """
+    versions: dict[str, str] = {}
+    for match in _GO_BUILD_DEP_RE.finditer(strings_output):
+        mod_path, version = match.group(1), match.group(2)
+        if mod_path not in versions:
+            versions[mod_path] = version
+    return versions
+
+
+def _is_go_binary(strings_output: str) -> bool:
+    """Heuristic check whether the strings output comes from a Go binary."""
+    return "go1." in strings_output or "\npath\t" in strings_output or "runtime.goexit" in strings_output
+
+
+def determine_v2_compliance(
+    v1_patterns_found: list[str],
+    go_libs_detected: list[str],
+    v2_indicators_found: list[str],
+    lib_versions: dict[str, str],
+) -> tuple[str, str]:
+    """Determine cgroups v2 compliance for a Go binary.
+
+    Returns:
+        Tuple of (compliance_status, compliance_note):
+        - compliance_status: one of "v2_compliant", "v2_likely_compliant",
+          "v2_unaware", "needs_review"
+        - compliance_note: human-readable explanation of the determination
+    """
+    uncovered_patterns = set(v1_patterns_found)
+    notes: list[str] = []
+    v2_indicators_set = set(v2_indicators_found)
+
+    for lib_name, lib_info in GO_V2_AWARE_LIBRARIES.items():
+        if lib_name not in go_libs_detected:
+            continue
+        detected_version = lib_versions.get(lib_name)
+        if detected_version and semver_gte(detected_version, lib_info["min_v2_version"]):
+            lib_v2_indicators = set(lib_info["v2_indicators"])
+            if not lib_v2_indicators or lib_v2_indicators.intersection(v2_indicators_set):
+                covered = set(lib_info["v1_patterns_covered"])
+                newly_covered = covered.intersection(uncovered_patterns)
+                uncovered_patterns -= covered
+                if newly_covered:
+                    short_name = lib_name.rsplit("/", 1)[-1]
+                    indicators_str = (
+                        "+".join(ind for ind in lib_info["v2_indicators"] if ind in v2_indicators_set) or "neutral"
+                    )
+                    covered_str = "+".join(sorted(newly_covered))
+                    notes.append(
+                        f"{short_name} {detected_version} (>={lib_info['min_v2_version']}): "
+                        f"{indicators_str} detected, covers {covered_str}"
+                    )
+
+    note_str = "; ".join(notes)
+
+    if not uncovered_patterns:
+        return "v2_compliant", note_str
+    elif v2_indicators_found:
+        return "v2_likely_compliant", note_str
+    elif not v2_indicators_found and not go_libs_detected:
+        return "v2_unaware", ""
+    else:
+        return "needs_review", note_str
+
+
+def detect_go_v2_compliance(
+    strings_output: str,
+    v1_patterns_found: list[str],
+    go_cgroup_libs: list[str],
+    debug: bool = False,
+) -> tuple[str, str, dict[str, str]]:
+    """Detect cgroups v2 compliance for a Go binary.
+
+    Runs all v2 awareness checks against the already-captured strings output
+    (no additional `strings` invocation).
+
+    Args:
+        strings_output: Full output from `strings` on the binary.
+        v1_patterns_found: cgroup v1 patterns already detected.
+        go_cgroup_libs: Go cgroup library paths already detected.
+        debug: Enable debug output.
+
+    Returns:
+        Tuple of (compliance_status, compliance_note, lib_versions):
+        - compliance_status: "v2_compliant", "v2_likely_compliant",
+          "v2_unaware", or "needs_review"
+        - compliance_note: human-readable explanation
+        - lib_versions: dict of detected Go module versions
+    """
+    v2_indicators = _find_v2_awareness_indicators(strings_output)
+    lib_versions = _extract_go_dep_versions(strings_output)
+
+    if debug:
+        if v2_indicators:
+            print(f"      [DEBUG]   v2 awareness indicators: {', '.join(v2_indicators)}")
+        if lib_versions:
+            ver_strs = [f"{k} {v}" for k, v in lib_versions.items()]
+            print(f"      [DEBUG]   Go dep versions: {', '.join(ver_strs)}")
+
+    logger.debug("  v2 awareness indicators: %s", v2_indicators)
+    logger.debug("  Go dep versions: %s", lib_versions)
+
+    status, note = determine_v2_compliance(
+        v1_patterns_found=v1_patterns_found,
+        go_libs_detected=go_cgroup_libs,
+        v2_indicators_found=v2_indicators,
+        lib_versions=lib_versions,
+    )
+
+    logger.debug("  v2 compliance: %s — %s", status, note)
+    if debug:
+        print(f"      [DEBUG]   v2 compliance: {status} — {note}")
+
+    return status, note, lib_versions
+
+
+# ---------------------------------------------------------------------------
 # Patterns for detecting sourced/executed scripts in shell scripts
 # ---------------------------------------------------------------------------
 _SOURCE_PATTERN = re.compile(
@@ -407,7 +617,7 @@ def scan_binary_strings(
     extract_path: Path,
     binary_refs: list[str],
     debug: bool = False,
-) -> tuple[list, bool, list[str]]:
+) -> tuple[list, bool, list[str], str, str, dict[str, str]]:
     """Scan binary files via `strings` for cgroup v1 references.
 
     For each binary reference:
@@ -417,6 +627,7 @@ def scan_binary_strings(
     4. Check the output for Go cgroup library imports
     5. Check the output for cgroup v1 patterns
     6. Check for cgroup v2 patterns (v2-awareness)
+    7. For Go binaries with v1 patterns: detect v2 compliance
 
     Args:
         extract_path: Path to the extracted container rootfs.
@@ -424,10 +635,15 @@ def scan_binary_strings(
         debug: Enable debug output.
 
     Returns:
-        Tuple of (matches, v2_aware, go_cgroup_libs):
+        Tuple of (matches, v2_aware, go_cgroup_libs, compliance_status,
+        compliance_note, lib_versions):
         - matches: list of DeepScanMatch objects with confidence="low"
         - v2_aware: True if any binary contains both v1 and v2 patterns
         - go_cgroup_libs: list of detected Go cgroup package paths
+        - compliance_status: "v2_compliant", "v2_likely_compliant",
+          "v2_unaware", "needs_review", or "" if not a Go binary
+        - compliance_note: human-readable explanation of compliance
+        - lib_versions: dict of Go module versions detected
     """
     from .image_analyzer import DeepScanMatch
 
@@ -435,6 +651,9 @@ def scan_binary_strings(
     v2_aware = False
     scanned_binaries: set[str] = set()
     all_go_deps: list[str] = []
+    compliance_status = ""
+    compliance_note = ""
+    all_lib_versions: dict[str, str] = {}
 
     for binary_ref in binary_refs:
         resolved = _resolve_script_in_rootfs(binary_ref, extract_path)
@@ -499,12 +718,34 @@ def scan_binary_strings(
                 logger.debug("  Also found %d cgroup v2 patterns — v2-aware", len(v2_patterns))
                 if debug:
                     print(f"      [DEBUG]   Also found {len(v2_patterns)} cgroup v2 patterns → v2-aware")
+
+            if _is_go_binary(strings_output) and go_deps:
+                status, note, lib_vers = detect_go_v2_compliance(
+                    strings_output=strings_output,
+                    v1_patterns_found=v1_patterns,
+                    go_cgroup_libs=go_deps,
+                    debug=debug,
+                )
+                all_lib_versions.update(lib_vers)
+                if not compliance_status or _compliance_priority(status) > _compliance_priority(compliance_status):
+                    compliance_status = status
+                    compliance_note = note
         else:
             logger.debug("  No cgroup v1 patterns found in %s", binary_ref)
             if debug:
                 print(f"      [DEBUG]   No cgroup v1 patterns found in {binary_ref}")
 
-    return matches, v2_aware, all_go_deps
+    return matches, v2_aware, all_go_deps, compliance_status, compliance_note, all_lib_versions
+
+
+def _compliance_priority(status: str) -> int:
+    """Return a priority value for compliance statuses (higher = more compliant)."""
+    return {
+        "v2_compliant": 4,
+        "v2_likely_compliant": 3,
+        "needs_review": 2,
+        "v2_unaware": 1,
+    }.get(status, 0)
 
 
 def _extract_sourced_paths(content: str) -> list[str]:
@@ -687,7 +928,7 @@ def run_deep_scan(
     entrypoint: list[str] | None = None,
     cmd: list[str] | None = None,
     debug: bool = False,
-) -> tuple[list, bool, list[str]]:
+) -> tuple[list, bool, list[str], str, str, dict[str, str]]:
     """Run all deep-scan heuristics on an extracted container rootfs.
 
     Args:
@@ -698,10 +939,14 @@ def run_deep_scan(
         debug: Enable debug output.
 
     Returns:
-        Tuple of (matches, v2_aware, go_cgroup_libs):
+        Tuple of (matches, v2_aware, go_cgroup_libs, compliance_status,
+        compliance_note, lib_versions):
         - matches: list of DeepScanMatch objects
         - v2_aware: True if any scanned source has both v1 and v2 patterns
         - go_cgroup_libs: list of detected Go cgroup package paths
+        - compliance_status: Go v2 compliance determination or ""
+        - compliance_note: human-readable compliance explanation
+        - lib_versions: dict of Go module versions detected
     """
     logger.debug("Deep scan enabled for %s", image_name)
     logger.debug("Extract path: %s", extract_path)
@@ -718,6 +963,9 @@ def run_deep_scan(
     all_matches: list = []
     v2_aware = False
     all_go_libs: list[str] = []
+    compliance_status = ""
+    compliance_note = ""
+    all_lib_versions: dict[str, str] = {}
 
     combined: list[str] = []
     if entrypoint:
@@ -763,7 +1011,7 @@ def run_deep_scan(
         logger.debug("Binary refs to scan with strings: %s", binary_refs)
         if debug:
             print(f"      [DEBUG] Binary refs to scan with strings: {binary_refs}")
-        binary_matches, binary_v2_aware, go_libs = scan_binary_strings(
+        binary_matches, binary_v2_aware, go_libs, comp_status, comp_note, lib_vers = scan_binary_strings(
             extract_path=extract_path,
             binary_refs=binary_refs,
             debug=debug,
@@ -772,5 +1020,8 @@ def run_deep_scan(
         if binary_v2_aware:
             v2_aware = True
         all_go_libs.extend(lib for lib in go_libs if lib not in all_go_libs)
+        compliance_status = comp_status
+        compliance_note = comp_note
+        all_lib_versions.update(lib_vers)
 
-    return all_matches, v2_aware, all_go_libs
+    return all_matches, v2_aware, all_go_libs, compliance_status, compliance_note, all_lib_versions

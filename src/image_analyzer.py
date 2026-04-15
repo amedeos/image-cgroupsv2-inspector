@@ -54,6 +54,9 @@ class ImageAnalysisResult:
     deep_scan_matches: list[DeepScanMatch] = field(default_factory=list)
     deep_scan_v2_aware_flag: bool = False
     deep_scan_go_cgroup_libs_list: list[str] = field(default_factory=list)
+    deep_scan_compliance_status: str = ""
+    deep_scan_compliance_note_text: str = ""
+    deep_scan_lib_versions: dict[str, str] = field(default_factory=dict)
     error: str | None = None
 
     @property
@@ -136,21 +139,6 @@ class ImageAnalysisResult:
         return "true" if self.deep_scan_matches else "false"
 
     @property
-    def deep_scan_confidence(self) -> str:
-        """Return the highest confidence level among all matches.
-
-        Priority: high > medium > low. Empty string if no matches or not scanned.
-        """
-        if not self.deep_scan_matches:
-            return ""
-        levels = {m.confidence for m in self.deep_scan_matches}
-        if "high" in levels:
-            return "high"
-        if "medium" in levels:
-            return "medium"
-        return "low"
-
-    @property
     def deep_scan_sources(self) -> str:
         """Return pipe-separated unique source files where matches were found."""
         if not self.deep_scan_matches:
@@ -167,24 +155,63 @@ class ImageAnalysisResult:
         return "|".join(patterns)
 
     @property
-    def deep_scan_v2_aware(self) -> str:
-        """Return 'true' if any scanned source contains both v1 and v2 patterns.
+    def deep_scan_confidence(self) -> str:
+        """Return the highest confidence level among all matches.
 
+        Priority: high > medium > low. Empty string if no matches or not scanned.
+        When Go v2 compliance is "v2_compliant", binary matches are upgraded
+        to "high" confidence (we're confident the binary handles v2).
+        """
+        if not self.deep_scan_matches:
+            return ""
+        levels = {m.confidence for m in self.deep_scan_matches}
+        if self.deep_scan_compliance_status == "v2_compliant" and levels == {"low"}:
+            return "high"
+        if "high" in levels:
+            return "high"
+        if "medium" in levels:
+            return "medium"
+        return "low"
+
+    @property
+    def deep_scan_v2_aware(self) -> str:
+        """Return Go v2 compliance status when available, else boolean fallback.
+
+        Values: "v2_compliant", "v2_likely_compliant", "needs_review",
+        "v2_unaware", or legacy "true"/"false".
         Empty string if no deep scan was performed or no v1 matches found.
         """
         if not self.deep_scan_matches:
             return ""
+        if self.deep_scan_compliance_status:
+            return self.deep_scan_compliance_status
         return "true" if self.deep_scan_v2_aware_flag else "false"
 
     @property
     def deep_scan_go_cgroup_libs(self) -> str:
-        """Return pipe-separated Go cgroup library paths detected in binaries.
+        """Return pipe-separated Go cgroup library paths with versions.
 
+        Format: "lib_path version" when version is known, "lib_path" otherwise.
         Empty string if no deep scan was performed or no libraries detected.
         """
         if not self.deep_scan_go_cgroup_libs_list:
             return ""
-        return "|".join(self.deep_scan_go_cgroup_libs_list)
+        parts: list[str] = []
+        for lib in self.deep_scan_go_cgroup_libs_list:
+            version = self.deep_scan_lib_versions.get(lib)
+            if version:
+                parts.append(f"{lib} {version}")
+            else:
+                parts.append(lib)
+        return "|".join(parts)
+
+    @property
+    def deep_scan_compliance_note(self) -> str:
+        """Return the compliance determination note.
+
+        Empty string if no compliance check was performed.
+        """
+        return self.deep_scan_compliance_note_text
 
 
 class ImageAnalyzer:
@@ -1278,7 +1305,7 @@ class ImageAnalyzer:
                 entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
                 from .deep_scan import run_deep_scan
 
-                deep_matches, v2_aware, go_libs = run_deep_scan(
+                deep_matches, v2_aware, go_libs, comp_status, comp_note, lib_vers = run_deep_scan(
                     extract_path=extract_path,
                     image_name=podman_image,
                     entrypoint=entrypoint,
@@ -1288,6 +1315,9 @@ class ImageAnalyzer:
                 result.deep_scan_matches = deep_matches
                 result.deep_scan_v2_aware_flag = v2_aware
                 result.deep_scan_go_cgroup_libs_list = go_libs
+                result.deep_scan_compliance_status = comp_status
+                result.deep_scan_compliance_note_text = comp_note
+                result.deep_scan_lib_versions = lib_vers
 
             if result.java_binaries:
                 for b in result.java_binaries:
@@ -1317,7 +1347,11 @@ class ImageAnalyzer:
                     print(f"      {compat} .NET: {b.version} at {b.path}")
 
             if self.deep_scan and result.deep_scan_matches:
-                v2_note = " (v2-aware)" if result.deep_scan_v2_aware_flag else ""
+                v2_note = ""
+                if result.deep_scan_compliance_status:
+                    v2_note = f" ({result.deep_scan_compliance_status})"
+                elif result.deep_scan_v2_aware_flag:
+                    v2_note = " (v2-aware)"
                 logger.debug(
                     "Deep-scan: %d cgroup v1 reference(s) found%s",
                     len(result.deep_scan_matches),
@@ -1331,14 +1365,19 @@ class ImageAnalyzer:
                     logger.debug("  [%s] %s: %s", src_matches[0].confidence, src, patterns_str)
                     print(f"        [{src_matches[0].confidence}] {src}: {patterns_str}")
                 if result.deep_scan_go_cgroup_libs_list:
-                    logger.debug("Go cgroup libraries: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
-                    print(f"      📦 Go cgroup libraries: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
+                    libs_display = result.deep_scan_go_cgroup_libs
+                    logger.debug("Go cgroup libraries: %s", libs_display)
+                    print(f"      📦 Go cgroup libraries: {libs_display}")
+                if result.deep_scan_compliance_note_text:
+                    logger.debug("Compliance: %s", result.deep_scan_compliance_note_text)
+                    print(f"      📋 Compliance: {result.deep_scan_compliance_note_text}")
             elif self.deep_scan:
                 logger.debug("Deep-scan: no cgroup v1 references found")
                 print("      ✓ Deep-scan: no cgroup v1 references found")
                 if result.deep_scan_go_cgroup_libs_list:
-                    logger.debug("Go cgroup libraries detected: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
-                    print(f"      📦 Go cgroup libraries detected: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
+                    libs_display = result.deep_scan_go_cgroup_libs
+                    logger.debug("Go cgroup libraries detected: %s", libs_display)
+                    print(f"      📦 Go cgroup libraries detected: {libs_display}")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
                 logger.debug("No Java, Node.js, or .NET binaries found")

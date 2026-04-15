@@ -33,6 +33,7 @@ ANALYSIS_KEYS = (
     "deep_scan_patterns",
     "deep_scan_v2_aware",
     "deep_scan_go_cgroup_libs",
+    "deep_scan_compliance_note",
     "analysis_error",
 )
 

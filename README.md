@@ -623,9 +623,12 @@ When the deep-scan finds cgroup v1 patterns in a file that **also** contains cgr
 | `deep_scan_match` | `deep_scan_v2_aware` | Action |
 |----|----|----|
 | `false` | (empty) | No cgroup v1 references found — image is fine |
-| `true` | `true` | v1 references found but image handles both v1 and v2 — likely safe |
+| `true` | `v2_compliant` | Go binary: all v1 patterns covered by v2-aware libraries (safe to migrate) |
+| `true` | `v2_likely_compliant` | Go binary: v2 indicators found but cannot fully verify coverage (low risk) |
+| `true` | `needs_review` | Go binary: partial v2 awareness detected, manual verification needed |
+| `true` | `v2_unaware` | Go binary: no v2 awareness detected (OOMKill risk on cgroups v2) |
+| `true` | `true` | Non-Go: v1 references found but v2 patterns also present — likely safe |
 | `true` | `false` | v1 references found with no v2 fallback — **investigate and remediate** |
-| `false` | (empty) | No direct v1 patterns but binary uses Go cgroup libraries — investigate |
 
 #### Source Chain Following
 
@@ -651,7 +654,37 @@ Go binaries compiled with static linking embed the full import paths of all depe
 - `go.uber.org/automaxprocs` — auto-tuning GOMAXPROCS from cgroup CPU limits
 - `github.com/KimMachineGun/automemlimit` — auto-tuning memory limits from cgroups
 
-These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informational signal. Finding a library does **not** set `deep_scan_match=true` — the library might be used in v2-compatible mode. The column helps operators identify binaries that likely interact with cgroups even when no direct v1 path patterns were found.
+These are reported in the `deep_scan_go_cgroup_libs` CSV column (with versions when available) as an informational signal. Finding a library does **not** set `deep_scan_match=true` — the library might be used in v2-compatible mode. The column helps operators identify binaries that likely interact with cgroups even when no direct v1 path patterns were found.
+
+#### Automatic Go v2 Compliance Detection
+
+When the deep-scan finds cgroup v1 patterns in a Go binary that also uses known cgroup libraries, the tool automatically checks whether the binary is **v2 compliant** — meaning it has v1 references but also has proven v2-aware code paths from libraries that fully support cgroups v2.
+
+The detection works by:
+1. Scanning for **v2 awareness indicators** in the binary (e.g., `isCGroupV2`, `CGroups2`, `cgroups2.go`, `cpu.max`, `memory.max`)
+2. Extracting **Go module versions** from embedded build info (Go 1.18+ embeds `dep` lines)
+3. Checking whether the detected library version meets the **minimum v2-support version**
+4. Determining whether all v1 patterns are **covered** by v2-aware libraries
+
+**Compliance status values:**
+
+| Status | Meaning |
+|--------|---------|
+| `v2_compliant` | All v1 patterns are covered by v2-aware libraries with sufficient versions. Safe to migrate to cgroups v2 |
+| `v2_likely_compliant` | v2 indicators found but cannot fully verify coverage of all v1 patterns. Low risk |
+| `needs_review` | Partial v2 awareness detected — some patterns uncovered, or library version unknown. Manual verification needed |
+| `v2_unaware` | No v2 awareness indicators and no known cgroup libraries detected. High risk on cgroups v2 systems |
+
+**Known v2-aware Go libraries:**
+
+| Library | Min v2 Version | Patterns Covered |
+|---------|---------------|-----------------|
+| `go.uber.org/automaxprocs` | v1.5.0 | `cpu.cfs_quota_us`, `cpu.cfs_period_us` |
+| `github.com/containerd/cgroups` | v1.0.0 | `cpu.cfs_quota_us`, `cpu.cfs_period_us`, `memory.limit_in_bytes`, `cpuacct` |
+| `github.com/opencontainers/runc/libcontainer/cgroups` | v1.1.0 | `cpu.cfs_quota_us`, `cpu.cfs_period_us`, `memory.limit_in_bytes`, `cpuacct` |
+| `github.com/prometheus/procfs` | v0.8.0 | *(none — reads /proc, cgroup-neutral)* |
+
+This enhancement only applies to Go binaries. Java, Node.js, and .NET have their own version-based detection and are not affected.
 
 #### Deep Scan Example
 
@@ -737,8 +770,9 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `deep_scan_confidence` | Highest confidence level: `"high"`, `"medium"`, or `"low"` (empty if no match) |
 | `deep_scan_sources` | Pipe-separated file paths where matches were found (e.g., `/entrypoint.sh\|/opt/helpers.sh` or `binary:/usr/bin/cadvisor`) |
 | `deep_scan_patterns` | Pipe-separated cgroup v1 patterns matched (e.g., `memory.limit_in_bytes\|cpu.cfs_quota_us`) |
-| `deep_scan_v2_aware` | `"true"` if matched files also contain cgroup v2 patterns, `"false"` if v1-only, empty if no match |
-| `deep_scan_go_cgroup_libs` | Pipe-separated Go package paths that interact with cgroups (e.g., `github.com/prometheus/procfs\|github.com/containerd/cgroups`). Informational — these libraries may use v1 or v2 |
+| `deep_scan_v2_aware` | cgroups v2 compliance status. For Go binaries: `"v2_compliant"`, `"v2_likely_compliant"`, `"needs_review"`, or `"v2_unaware"`. For non-Go sources: `"true"` if v2 patterns also found, `"false"` if v1-only. Empty if no match |
+| `deep_scan_go_cgroup_libs` | Pipe-separated Go package paths with versions when available (e.g., `go.uber.org/automaxprocs v1.5.1\|github.com/prometheus/procfs v0.7.3`). Informational — these libraries may use v1 or v2 |
+| `deep_scan_compliance_note` | Human-readable explanation of Go v2 compliance determination. Empty if not a Go binary or no compliance check performed |
 | `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images
@@ -760,12 +794,13 @@ Possible values for these fields:
 When `--deep-scan` is enabled, these additional fields help identify images with cgroup v1 dependencies:
 
 - **`deep_scan_match`**: If `"true"`, the image contains cgroup v1 references in its entrypoint scripts or binaries
-- **`deep_scan_v2_aware`**: If `"false"` (with `deep_scan_match=true`), the image has v1 references **without** v2 fallback logic — these are the highest priority for remediation
-- **`deep_scan_confidence`**: Indicates how reliable the finding is (`high` > `medium` > `low`)
+- **`deep_scan_v2_aware`**: Compliance status for Go binaries (`"v2_compliant"`, `"v2_likely_compliant"`, `"needs_review"`, `"v2_unaware"`) or boolean for non-Go (`"true"`/`"false"`). The highest priority for remediation are `"false"` and `"v2_unaware"` entries
+- **`deep_scan_confidence`**: Indicates how reliable the finding is (`high` > `medium` > `low`). When a Go binary is `v2_compliant`, confidence is automatically upgraded to `high`
+- **`deep_scan_compliance_note`**: Explanation of the Go v2 compliance determination (e.g., which library covers which patterns)
 
 To find the most critical images, filter for:
 ```csv
-deep_scan_match == "true" AND deep_scan_v2_aware == "false"
+deep_scan_match == "true" AND deep_scan_v2_aware IN ("false", "v2_unaware", "needs_review")
 ```
 
 ### Filename Format
