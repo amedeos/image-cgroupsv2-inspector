@@ -3,8 +3,9 @@
 FROM registry.access.redhat.com/ubi9/python-312
 
 USER root
-# Install system dependencies: podman (image pull/inspect), acl (extended ACLs for rootfs)
-RUN dnf install -y podman acl && dnf clean all
+# Install system dependencies: podman (image pull/inspect), acl (extended ACLs for rootfs),
+# golang (deterministic Go binary scanning via `go version`)
+RUN dnf install -y podman acl golang && dnf clean all
 
 WORKDIR /app
 

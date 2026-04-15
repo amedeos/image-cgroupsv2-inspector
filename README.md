@@ -192,7 +192,7 @@ pip install -r requirements.txt
 
 ## Container
 
-You can build and run the tool as a container (UBI 9, Python 3.12). The image uses the main script as the entrypoint.
+You can build and run the tool as a container (UBI 9, Python 3.12). The image includes `podman`, `acl`, and `golang`, so Go binary scanning is enabled by default. The image uses the main script as the entrypoint.
 
 **Build:**
 
