@@ -476,6 +476,63 @@ push_test_images() {
     podman rmi "deep-scan-exec-cgv1:latest" 2>/dev/null || true
     echo ""
 
+    # ================================================================
+    # Go cgroups v2 compliance test images
+    # ================================================================
+    echo ""
+    info "================================================================"
+    info "  Go cgroups v2 compliance test images"
+    info "================================================================"
+    echo ""
+
+    # --- Case 1: Go>=1.19, no cgroup libs → v2_compliant (runtime) ---
+    info "=== deep-scan-go-v2-compliant-runtime (Go 1.22, no cgroup libs) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-compliant-runtime" \
+        "Containerfile" "deep-scan-go-v2-compliant-runtime" "latest" || true
+    add_tag "deep-scan-go-v2-compliant-runtime" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-compliant-runtime:latest" 2>/dev/null || true
+    echo ""
+
+    # --- Case 2: Go>=1.19 + automaxprocs>=1.5.0 → v2_compliant (double) ---
+    info "=== deep-scan-go-v2-compliant-automaxprocs (Go 1.22 + automaxprocs v1.6.0) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-compliant-automaxprocs" \
+        "Containerfile" "deep-scan-go-v2-compliant-automaxprocs" "latest" || true
+    add_tag "deep-scan-go-v2-compliant-automaxprocs" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-compliant-automaxprocs:latest" 2>/dev/null || true
+    echo ""
+
+    # --- Case 3: Go<1.19 + automaxprocs>=1.5.0 → v2_compliant (lib) ---
+    info "=== deep-scan-go-v2-compliant-lib-only (Go 1.18 + automaxprocs v1.5.1) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-compliant-lib-only" \
+        "Containerfile" "deep-scan-go-v2-compliant-lib-only" "latest" || true
+    add_tag "deep-scan-go-v2-compliant-lib-only" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-compliant-lib-only:latest" 2>/dev/null || true
+    echo ""
+
+    # --- Case 4: Go<1.19 + automaxprocs<1.5.0 → needs_review ---
+    info "=== deep-scan-go-v2-needs-review (Go 1.18 + automaxprocs v1.4.0) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-needs-review" \
+        "Containerfile" "deep-scan-go-v2-needs-review" "latest" || true
+    add_tag "deep-scan-go-v2-needs-review" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-needs-review:latest" 2>/dev/null || true
+    echo ""
+
+    # --- Case 5: Go<1.19, no cgroup libs → v2_unaware ---
+    info "=== deep-scan-go-v2-unaware (Go 1.18, no cgroup libs) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/go-v2-unaware" \
+        "Containerfile" "deep-scan-go-v2-unaware" "latest" || true
+    add_tag "deep-scan-go-v2-unaware" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-go-v2-unaware:latest" 2>/dev/null || true
+    echo ""
+
+    # --- Case 6: C binary, no Go → no Go detection ---
+    info "=== deep-scan-c-binary-no-go (C binary, negative control for Go detection) ==="
+    build_and_push "${SCRIPT_DIR}/deep-scan-images/c-binary-no-go" \
+        "Containerfile" "deep-scan-c-binary-no-go" "latest" || true
+    add_tag "deep-scan-c-binary-no-go" "latest" "v1.0-${DATE_TAG}" || true
+    podman rmi "deep-scan-c-binary-no-go:latest" 2>/dev/null || true
+    echo ""
+
     # --- deep-scan-cadvisor (upstream, cgroup v1 positive) ---
     info "=== deep-scan-cadvisor (cAdvisor v0.44.0, cgroup v1 positive) ==="
     pull_tag_push "gcr.io/cadvisor/cadvisor:v0.44.0" \

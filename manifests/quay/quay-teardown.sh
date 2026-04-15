@@ -70,6 +70,13 @@ TEST_REPOS=(
     deep-scan-node-exporter
     deep-scan-nginx-negative
     deep-scan-redis-negative
+    # Go cgroups v2 compliance test images
+    deep-scan-go-v2-compliant-runtime
+    deep-scan-go-v2-compliant-automaxprocs
+    deep-scan-go-v2-compliant-lib-only
+    deep-scan-go-v2-needs-review
+    deep-scan-go-v2-unaware
+    deep-scan-c-binary-no-go
 )
 
 # ---------------------------------------------------------------------------
