@@ -60,8 +60,10 @@ def parse_go_version(version_str: str) -> tuple[int | None, int | None]:
 
 def semver_gte(version_a: str, version_b: str) -> bool:
     """Check if *version_a* >= *version_b* (simple semver with v-prefix)."""
+
     def parse(v: str) -> tuple[int, ...]:
         return tuple(int(p) for p in v.lstrip("v").split(".")[:3])
+
     try:
         return parse(version_a) >= parse(version_b)
     except (ValueError, IndexError):
@@ -100,8 +102,7 @@ def check_go_compatibility(
                 )
             else:
                 return None, (
-                    f"Go {major}.{minor} < 1.19, {short_name} "
-                    f"{detected_version} < {min_version}: needs review"
+                    f"Go {major}.{minor} < 1.19, {short_name} {detected_version} < {min_version}: needs review"
                 )
 
     return False, f"Go {major}.{minor} < 1.19, no v2-aware cgroup modules detected"

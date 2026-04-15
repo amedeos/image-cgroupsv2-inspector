@@ -1056,5 +1056,3 @@ exec "$@"
             debug=False,
         )
         assert not any("binary:/bin/bash" in m.source for m in matches)
-
-

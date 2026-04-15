@@ -216,6 +216,7 @@ class ImageAnalysisResult:
             return ""
         return "true" if self.deep_scan_v2_aware_flag else "false"
 
+
 class ImageAnalyzer:
     """
     Analyzes container images for Java, NodeJS, and .NET binaries.
@@ -1326,10 +1327,7 @@ class ImageAnalyzer:
                 for container_path, extracted_path, go_ver in go_binary_infos:
                     modules = get_go_module_info(extracted_path, debug=debug)
 
-                    cgroup_modules = {
-                        mod: ver for mod, ver in modules.items()
-                        if mod in GO_V2_AWARE_MODULES
-                    }
+                    cgroup_modules = {mod: ver for mod, ver in modules.items() if mod in GO_V2_AWARE_MODULES}
 
                     is_compatible, reason = check_go_compatibility(go_ver, modules)
 
@@ -1346,7 +1344,9 @@ class ImageAnalyzer:
                 if result.go_binaries:
                     for gb in result.go_binaries:
                         compat_icon = "✓" if gb.is_compatible else ("?" if gb.is_compatible is None else "✗")
-                        logger.debug("Go binary %s: %s [%s] %s", gb.path, gb.go_version, compat_icon, gb.compliance_reason)
+                        logger.debug(
+                            "Go binary %s: %s [%s] %s", gb.path, gb.go_version, compat_icon, gb.compliance_reason
+                        )
                         print(f"      {compat_icon} {gb.path}: {gb.go_version} — {gb.compliance_reason}")
                         if gb.modules:
                             mods_str = ", ".join(f"{m} {v}" for m, v in gb.modules.items())

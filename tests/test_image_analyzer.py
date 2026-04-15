@@ -789,4 +789,3 @@ class TestDeepScanResult:
     def test_v2_aware_empty_when_no_matches(self):
         result = ImageAnalysisResult("t", "")
         assert result.deep_scan_v2_aware == ""
-

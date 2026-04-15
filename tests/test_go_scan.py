@@ -89,51 +89,37 @@ class TestCheckGoCompatibility:
         assert "runtime native v2 support" in reason
 
     def test_go_1_22_with_modules(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.22", {"go.uber.org/automaxprocs": "v1.6.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.22", {"go.uber.org/automaxprocs": "v1.6.0"})
         assert is_compat is True
         assert "runtime native" in reason
 
     def test_go_1_18_automaxprocs_v1_6_0(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"go.uber.org/automaxprocs": "v1.6.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"go.uber.org/automaxprocs": "v1.6.0"})
         assert is_compat is True
         assert "automaxprocs" in reason
 
     def test_go_1_18_automaxprocs_v1_5_1(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"go.uber.org/automaxprocs": "v1.5.1"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"go.uber.org/automaxprocs": "v1.5.1"})
         assert is_compat is True
         assert "automaxprocs" in reason
 
     def test_go_1_18_automaxprocs_v1_5_0(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"go.uber.org/automaxprocs": "v1.5.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"go.uber.org/automaxprocs": "v1.5.0"})
         assert is_compat is True
         assert "automaxprocs" in reason
 
     def test_go_1_18_automaxprocs_v1_4_0_needs_review(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"go.uber.org/automaxprocs": "v1.4.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"go.uber.org/automaxprocs": "v1.4.0"})
         assert is_compat is None
         assert "needs review" in reason
 
     def test_go_1_18_automemlimit_v0_7_0(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"github.com/KimMachineGun/automemlimit": "v0.7.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"github.com/KimMachineGun/automemlimit": "v0.7.0"})
         assert is_compat is True
         assert "automemlimit" in reason
 
     def test_go_1_18_automemlimit_v0_1_0(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"github.com/KimMachineGun/automemlimit": "v0.1.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"github.com/KimMachineGun/automemlimit": "v0.1.0"})
         assert is_compat is True
         assert "automemlimit" in reason
 
@@ -143,9 +129,7 @@ class TestCheckGoCompatibility:
         assert "no v2-aware" in reason
 
     def test_go_1_18_unknown_module_only(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.18", {"github.com/gorilla/mux": "v1.8.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.18", {"github.com/gorilla/mux": "v1.8.0"})
         assert is_compat is False
         assert "no v2-aware" in reason
 
@@ -155,9 +139,7 @@ class TestCheckGoCompatibility:
         assert "Cannot parse" in reason
 
     def test_containerd_cgroups_v1_0_0(self):
-        is_compat, reason = check_go_compatibility(
-            "go1.17", {"github.com/containerd/cgroups": "v1.0.0"}
-        )
+        is_compat, reason = check_go_compatibility("go1.17", {"github.com/containerd/cgroups": "v1.0.0"})
         assert is_compat is True
         assert "cgroups" in reason
 
@@ -271,21 +253,15 @@ class TestImageAnalysisResultGoProperties:
 
     def test_multiple_binaries_paths(self):
         result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
-        result.go_binaries.append(
-            GoBinaryInfo(path="/bin/a", go_version="go1.22", is_compatible=True)
-        )
-        result.go_binaries.append(
-            GoBinaryInfo(path="/bin/b", go_version="go1.21", is_compatible=True)
-        )
+        result.go_binaries.append(GoBinaryInfo(path="/bin/a", go_version="go1.22", is_compatible=True))
+        result.go_binaries.append(GoBinaryInfo(path="/bin/b", go_version="go1.21", is_compatible=True))
         assert result.go_found == "/bin/a; /bin/b"
         assert result.go_versions == "go1.22; go1.21"
         assert result.go_compatible == "Yes"
 
     def test_modules_str_no_modules(self):
         result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
-        result.go_binaries.append(
-            GoBinaryInfo(path="/bin/a", go_version="go1.22", modules={}, is_compatible=True)
-        )
+        result.go_binaries.append(GoBinaryInfo(path="/bin/a", go_version="go1.22", modules={}, is_compatible=True))
         assert result.go_modules_str == "None"
 
     def test_modules_str_multiple_modules(self):
