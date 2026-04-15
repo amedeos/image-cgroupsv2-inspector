@@ -372,6 +372,7 @@ class TestAnalysisOrchestratorOpenShift:
                 "registry.apps.example.com",
                 "sha256~token123",
                 deep_scan=False,
+                go_scan=False,
             )
 
     def test_openshift_token_passed_to_analyzer(self):
@@ -670,7 +671,6 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_sources"] == "/entry.sh"
         assert images[0]["deep_scan_patterns"] == "memory.limit_in_bytes"
         assert images[0]["deep_scan_v2_aware"] == "false"
-        assert images[0]["deep_scan_go_cgroup_libs"] == ""
 
     def test_deep_scan_fields_empty_when_no_matches(self):
         images = [{"image_name": "test:latest"}]
@@ -682,15 +682,37 @@ class TestApplyResultsDeepScan:
         assert images[0]["deep_scan_sources"] == ""
         assert images[0]["deep_scan_patterns"] == ""
         assert images[0]["deep_scan_v2_aware"] == ""
-        assert images[0]["deep_scan_go_cgroup_libs"] == ""
 
-    def test_deep_scan_go_libs_mapped(self):
+    def test_go_fields_mapped(self):
+        from src.go_scan import GoBinaryInfo
+
         images = [{"image_name": "test:latest"}]
         result = ImageAnalysisResult(
             image_name="test:latest",
             image_id="abc",
-            deep_scan_go_cgroup_libs_list=["github.com/prometheus/procfs"],
+            go_binaries=[
+                GoBinaryInfo(
+                    path="/usr/local/bin/app",
+                    go_version="go1.22.5",
+                    modules={"go.uber.org/automaxprocs": "v1.6.0"},
+                    is_compatible=True,
+                    compliance_reason="Go 1.22 >= 1.19: runtime native v2 support",
+                ),
+            ],
         )
         cache = {"test:latest": result}
         AnalysisOrchestrator._apply_results(images, cache)
-        assert images[0]["deep_scan_go_cgroup_libs"] == "github.com/prometheus/procfs"
+        assert images[0]["go_binary"] == "/usr/local/bin/app"
+        assert images[0]["go_version"] == "go1.22.5"
+        assert images[0]["go_cgroup_v2_compatible"] == "Yes"
+        assert images[0]["go_modules"] == "go.uber.org/automaxprocs v1.6.0"
+
+    def test_go_fields_empty_when_no_binaries(self):
+        images = [{"image_name": "test:latest"}]
+        result = ImageAnalysisResult(image_name="test:latest", image_id="abc")
+        cache = {"test:latest": result}
+        AnalysisOrchestrator._apply_results(images, cache)
+        assert images[0]["go_binary"] == "None"
+        assert images[0]["go_version"] == "None"
+        assert images[0]["go_cgroup_v2_compatible"] == "N/A"
+        assert images[0]["go_modules"] == "None"

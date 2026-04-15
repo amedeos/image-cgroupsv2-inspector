@@ -59,6 +59,7 @@ class AnalysisOrchestrator:
         resume: bool = False,
         target: str = "",
         deep_scan: bool = False,
+        go_scan: bool = False,
     ) -> None:
         self.rootfs_path = rootfs_path
         self.pull_secret_path = pull_secret_path
@@ -69,6 +70,7 @@ class AnalysisOrchestrator:
         self.resume = resume
         self.target = target
         self.deep_scan = deep_scan
+        self.go_scan = go_scan
 
     def _save_csv(self, images: list[dict], filepath: str) -> None:
         """Write image records to CSV using the unified schema."""
@@ -113,6 +115,7 @@ class AnalysisOrchestrator:
             self.internal_registry_route,
             self.openshift_token,
             deep_scan=self.deep_scan,
+            go_scan=self.go_scan,
         )
 
         unique_image_names: list[str] = []
@@ -293,10 +296,13 @@ class AnalysisOrchestrator:
                 record["dotnet_binary"] = result.dotnet_found
                 record["dotnet_version"] = result.dotnet_versions
                 record["dotnet_cgroup_v2_compatible"] = result.dotnet_compatible
+                record["go_binary"] = result.go_found
+                record["go_version"] = result.go_versions
+                record["go_cgroup_v2_compatible"] = result.go_compatible
+                record["go_modules"] = result.go_modules_str
                 record["analysis_error"] = result.error or ""
                 record["deep_scan_match"] = result.deep_scan_match
                 record["deep_scan_confidence"] = result.deep_scan_confidence
                 record["deep_scan_sources"] = result.deep_scan_sources
                 record["deep_scan_patterns"] = result.deep_scan_patterns
                 record["deep_scan_v2_aware"] = result.deep_scan_v2_aware
-                record["deep_scan_go_cgroup_libs"] = result.deep_scan_go_cgroup_libs
