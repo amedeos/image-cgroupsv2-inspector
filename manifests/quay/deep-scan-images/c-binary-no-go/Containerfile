@@ -1,0 +1,8 @@
+FROM docker.io/library/gcc:13 AS builder
+WORKDIR /src
+COPY main.c .
+RUN gcc -static -o /app main.c
+
+FROM registry.access.redhat.com/ubi9-minimal:latest
+COPY --from=builder /app /usr/local/bin/app
+ENTRYPOINT ["/usr/local/bin/app"]
