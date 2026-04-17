@@ -1,0 +1,553 @@
+{
+  "errors": [
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "broken-image",
+          "source": "registry"
+        }
+      ],
+      "error": "podman pull failed: manifest unknown",
+      "image_name": "registry.example/myorg/broken:v1"
+    }
+  ],
+  "images": [
+    {
+      "consumers": [
+        {
+          "container_name": "dotnet-container",
+          "namespace": "dev",
+          "object_name": "dotnet-app",
+          "object_type": "StatefulSet",
+          "registry_org": "",
+          "registry_repo": "",
+          "source": "openshift"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "/usr/bin/dotnet",
+        "compatible": "Yes",
+        "version": "8.0.100"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:ddd",
+      "image_name": "registry.example/myorg/dotnet:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "compatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "ds-v1only",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "high",
+        "match": true,
+        "patterns": [
+          "memory.limit_in_bytes"
+        ],
+        "sources": [
+          "/entrypoint.sh"
+        ],
+        "v2_aware": false
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:hhh",
+      "image_name": "registry.example/myorg/ds-v1only:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "incompatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "ds-v2aware",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "low",
+        "match": true,
+        "patterns": [
+          "memory.limit_in_bytes",
+          "cpu.cfs_quota_us"
+        ],
+        "sources": [
+          "binary:/usr/bin/cadvisor"
+        ],
+        "v2_aware": true
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "/usr/bin/cadvisor",
+        "compatible": "Yes",
+        "modules": "None",
+        "version": "go1.20.0"
+      },
+      "image_id": "sha256:iii",
+      "image_name": "registry.example/myorg/ds-v2aware:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "compatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "go-modern",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "/app/bin",
+        "compatible": "Yes",
+        "modules": "None",
+        "version": "go1.22.0"
+      },
+      "image_id": "sha256:eee",
+      "image_name": "registry.example/myorg/go-modern:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "compatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "go-old",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "/app/bin",
+        "compatible": "No",
+        "modules": "None",
+        "version": "go1.18.0"
+      },
+      "image_id": "sha256:fff",
+      "image_name": "registry.example/myorg/go-old:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "incompatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "go-review",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "/app/bin",
+        "compatible": "Needs Review",
+        "modules": "go.uber.org/automaxprocs@v1.4.0",
+        "version": "go1.18.0"
+      },
+      "image_id": "sha256:ggg",
+      "image_name": "registry.example/myorg/go-review:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "needs_review",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "java-app",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:aaa",
+      "image_name": "registry.example/myorg/java-app:v1",
+      "java": {
+        "binary": "/usr/bin/java",
+        "compatible": "Yes",
+        "version": "17.0.18"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "compatible",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "java-old",
+          "source": "registry"
+        },
+        {
+          "container_name": "myapp-container",
+          "namespace": "prod",
+          "object_name": "myapp",
+          "object_type": "Deployment",
+          "registry_org": "",
+          "registry_repo": "",
+          "source": "openshift"
+        },
+        {
+          "container_name": "web-container",
+          "namespace": "prod",
+          "object_name": "web",
+          "object_type": "Deployment",
+          "registry_org": "",
+          "registry_repo": "",
+          "source": "openshift"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:bbb",
+      "image_name": "registry.example/myorg/java-old:v1",
+      "java": {
+        "binary": "/usr/bin/java",
+        "compatible": "No",
+        "version": "1.8.0_342"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "incompatible",
+      "used_by_count": 3
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "java-unknown",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:jjj",
+      "image_name": "registry.example/myorg/java-unknown:v1",
+      "java": {
+        "binary": "/usr/bin/java",
+        "compatible": "Unknown",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "needs_review",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
+          "container_name": "node-container",
+          "namespace": "dev",
+          "object_name": "node-app",
+          "object_type": "Deployment",
+          "registry_org": "",
+          "registry_repo": "",
+          "source": "openshift"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:ccc",
+      "image_name": "registry.example/myorg/node-new:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "/usr/bin/node",
+        "compatible": "Yes",
+        "version": "v20.10.0"
+      },
+      "overall_status": "compatible",
+      "used_by_count": 1
+    }
+  ],
+  "metadata": {
+    "csv_filename": "sample_report.csv",
+    "generated_at": "2026-04-17T12:00:00",
+    "source_mode": "mixed",
+    "target": "sample-target",
+    "tool_version": "2.0.0"
+  },
+  "summary": {
+    "by_compatibility": {
+      "dotnet": {
+        "na": 9,
+        "no": 0,
+        "unknown": 0,
+        "yes": 1
+      },
+      "go": {
+        "needs_review": 1,
+        "no": 1,
+        "none": 6,
+        "yes": 2
+      },
+      "java": {
+        "na": 7,
+        "no": 1,
+        "unknown": 1,
+        "yes": 1
+      },
+      "node": {
+        "na": 9,
+        "no": 0,
+        "unknown": 0,
+        "yes": 1
+      }
+    },
+    "by_overall_status": {
+      "compatible": 5,
+      "incompatible": 3,
+      "needs_review": 2,
+      "unknown": 0
+    },
+    "deep_scan": {
+      "by_confidence": {
+        "high": 1,
+        "low": 1,
+        "medium": 0
+      },
+      "enabled": true,
+      "matches": 2,
+      "v1_only": 1,
+      "v2_aware": 1
+    },
+    "total_images": 10,
+    "total_rows": 13,
+    "with_errors": 1
+  }
+}
