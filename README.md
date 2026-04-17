@@ -30,6 +30,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 - 🔐 Store credentials in `.env` file for reuse
 - 📁 Create rootfs directory with proper extended ACLs
 - ✅ System checks: verify podman installation and disk space (min 20GB)
+- 🐹 Deterministic Go binary scanning — detects Go binaries via `go version` and checks cgroups v2 compatibility using a version and module matrix (`--disable-go` to opt out)
 - 🔍 Deep-scan heuristic analysis for cgroup v1 references in entrypoint scripts and binaries (`--deep-scan`)
 
 ## ⚠️ Disclaimer
@@ -141,6 +142,20 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
   # Gentoo
   sudo emerge sys-apps/acl
   ```
+- **Go** (optional) - For deterministic Go binary scanning. When the `go` command is found in `PATH`, the tool uses `go version` and `go version -m` to extract precise version and module information from Go binaries. Without it, Go binaries are not analyzed (the `go_*` CSV columns remain empty). Use `--disable-go` to explicitly skip Go scanning even when `go` is available.
+  ```bash
+  # Fedora/RHEL/CentOS
+  sudo dnf install golang
+  
+  # Ubuntu/Debian
+  sudo apt install golang-go
+  
+  # Gentoo
+  sudo emerge dev-lang/go
+  
+  # macOS (via Homebrew)
+  brew install go
+  ```
 
 ### Cluster Requirements
 
@@ -177,7 +192,7 @@ pip install -r requirements.txt
 
 ## Container
 
-You can build and run the tool as a container (UBI 9, Python 3.12). The image uses the main script as the entrypoint.
+You can build and run the tool as a container (UBI 9, Python 3.12). The image includes `podman`, `acl`, and `golang`, so Go binary scanning is enabled by default. The image uses the main script as the entrypoint.
 
 **Build:**
 
@@ -240,7 +255,7 @@ The container runs as root. For image pulls and analysis, podman runs inside the
 # Specify rootfs path for image extraction
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images
 
-# Analyze images for Java/NodeJS/.NET cgroup v2 compatibility
+# Analyze images for Java/NodeJS/.NET/Go cgroup v2 compatibility
 ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze
 
 # Inspect only a specific namespace
@@ -467,7 +482,8 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 |--------|-------------|
 | `--rootfs-path` | Path where rootfs directory will be created for image extraction |
 | `--output-dir` | Directory to save CSV output (default: `output`) |
-| `--analyze` | Analyze images for Java/NodeJS/.NET binaries (requires `--rootfs-path`) |
+| `--analyze` | Analyze images for Java/NodeJS/.NET/Go binaries (requires `--rootfs-path`) |
+| `--disable-go` | Disable Go binary scanning even when the `go` command is available on the host. By default, if `go` is found in `PATH`, Go scanning is enabled automatically |
 | `--deep-scan` | Enable heuristic deep-scan for cgroup v1 references in entrypoint scripts and binaries. Requires `--analyze`. Detects images that may not work on cgroup v2 systems even without Java/Node.js/.NET runtimes. Results appear in `deep_scan_*` CSV columns |
 | `--pull-secret` | Path to pull-secret file for image authentication (default: `.pull-secret`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
@@ -537,13 +553,18 @@ When using the `--analyze` flag, the tool:
 4. Searches for Java, Node.js, and .NET binaries
 5. Executes `-version` / `--version` to determine the exact version
 6. Checks if the version is compatible with cgroup v2
-7. **Deep-scan** (when `--deep-scan` is also enabled):
+7. **Go scan** (when `go` is available on the host and `--disable-go` is not set):
+   - Resolves ENTRYPOINT and CMD from image metadata via `podman inspect`
+   - Runs `go version` on each candidate binary to identify Go executables
+   - Runs `go version -m` to extract module dependencies
+   - Applies a deterministic compatibility matrix based on Go version and cgroup-aware modules
+8. **Deep-scan** (when `--deep-scan` is also enabled):
    - Extracts ENTRYPOINT and CMD from image metadata via `podman inspect`
    - Scans entrypoint shell scripts for cgroup v1 path references (high confidence)
    - Follows `source`/`.`/`exec` chains to scan referenced scripts (medium confidence)
    - Runs `strings` on compiled binaries (Go, C, etc.) in the entrypoint (low confidence)
    - Detects v2-aware images that handle both cgroup v1 and v2
-8. Cleans up the image and filesystem after each analysis
+9. Cleans up the image and filesystem after each analysis
 
 ### Internal Registry Support
 
@@ -588,6 +609,28 @@ oc apply -f manifests/cluster/registry-default-route.yaml
 | Node.js | 20.3.0+ |
 | .NET | 5.0+ |
 
+### Go cgroups v2 Compatibility Matrix
+
+Go binary scanning uses a deterministic approach based on the Go runtime version and the presence of specific cgroup-aware modules:
+
+| Go Version | Modules | Result | Reason |
+|------------|---------|--------|--------|
+| >= 1.19 | (any) | **Compatible** | Go runtime natively supports cgroups v2 since 1.19 |
+| < 1.19 | v2-aware module at sufficient version | **Compatible** | Module provides cgroups v2 support |
+| < 1.19 | v2-aware module below minimum version | **Needs Review** | Module present but too old for v2 |
+| < 1.19 | No v2-aware modules | **Not Compatible** | No cgroups v2 support detected |
+
+**v2-aware modules and minimum versions:**
+
+| Module | Minimum Version |
+|--------|----------------|
+| `go.uber.org/automaxprocs` | v1.5.0 |
+| `github.com/KimMachineGun/automemlimit` | v0.1.0 |
+| `github.com/containerd/cgroups` | v1.0.0 |
+| `github.com/opencontainers/runc/libcontainer/cgroups` | v1.1.0 |
+
+The `go_modules` CSV column only includes cgroup-relevant modules (those listed above), not all dependencies.
+
 ### Deep Scan — Heuristic cgroup v1 Detection
 
 The `--deep-scan` flag enables heuristic analysis to detect cgroup v1 references beyond Java, Node.js, and .NET version checks. This catches images with shell scripts or compiled binaries that directly read cgroup v1 files (e.g., `/sys/fs/cgroup/memory/memory.limit_in_bytes`), which will fail on cgroup v2 systems like OpenShift 4.x with RHEL 9+ nodes.
@@ -625,7 +668,6 @@ When the deep-scan finds cgroup v1 patterns in a file that **also** contains cgr
 | `false` | (empty) | No cgroup v1 references found — image is fine |
 | `true` | `true` | v1 references found but image handles both v1 and v2 — likely safe |
 | `true` | `false` | v1 references found with no v2 fallback — **investigate and remediate** |
-| `false` | (empty) | No direct v1 patterns but binary uses Go cgroup libraries — investigate |
 
 #### Source Chain Following
 
@@ -639,19 +681,6 @@ source "${SCRIPT_DIR}/cgroup-helpers.sh"
 Shell variable paths like `${SCRIPT_DIR}/file.sh` are resolved by extracting the filename and looking for it relative to the sourcing script's directory.
 
 Limits: maximum source-chain depth of 5, maximum script size of 1 MB, symlinks that escape the rootfs are blocked.
-
-#### Go Cgroup Library Detection
-
-Go binaries compiled with static linking embed the full import paths of all dependencies. The deep-scan checks for known Go packages that interact with cgroups:
-
-- `github.com/opencontainers/runc/libcontainer/cgroups` — low-level cgroup management
-- `github.com/containerd/cgroups` — containerd cgroup library
-- `github.com/prometheus/procfs` — Prometheus metrics from procfs/cgroupfs
-- `github.com/google/cadvisor/container` — cAdvisor container stats
-- `go.uber.org/automaxprocs` — auto-tuning GOMAXPROCS from cgroup CPU limits
-- `github.com/KimMachineGun/automemlimit` — auto-tuning memory limits from cgroups
-
-These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informational signal. Finding a library does **not** set `deep_scan_match=true` — the library might be used in v2-compatible mode. The column helps operators identify binaries that likely interact with cgroups even when no direct v1 path patterns were found.
 
 #### Deep Scan Example
 
@@ -669,6 +698,10 @@ These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informatio
 #      Java found in: 0 containers
 #      Node.js found in: 0 containers
 #      .NET found in: 0 containers
+#      Go found in: 5 containers
+#        ✓ cgroup v2 compatible: 3
+#        ✗ cgroup v2 incompatible: 1
+#        ⚠ cgroup v2 needs review: 1
 #      Deep-scan matches: 3 images with cgroup v1 references
 #        ⚠ high confidence: 1
 #        ⚠ low confidence: 2
@@ -680,7 +713,7 @@ These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informatio
 ### Analysis Example
 
 ```bash
-# Basic analysis (Java, Node.js, .NET version checks)
+# Basic analysis (Java, Node.js, .NET, Go version checks)
 ./image-cgroupsv2-inspector --rootfs-path /tmp/analysis --analyze
 
 # Full analysis with deep-scan heuristics
@@ -698,6 +731,11 @@ These are reported in the `deep_scan_go_cgroup_libs` CSV column as an informatio
 #      .NET found in: 8 containers
 #        ✓ cgroup v2 compatible: 6
 #        ✗ cgroup v2 incompatible: 2
+#      Go found in: 15 containers
+#        ✓ cgroup v2 compatible: 10
+#        ✗ cgroup v2 incompatible: 2
+#        ⚠ cgroup v2 needs review: 1
+#        ? cgroup v2 unknown: 2
 #      Deep-scan matches: 5 images with cgroup v1 references
 #        ⚠ high confidence: 1
 #        ⚠ medium confidence: 1
@@ -733,12 +771,15 @@ The tool generates a CSV file in the `output` directory (or the path specified b
 | `dotnet_binary` | Path to .NET binary found (or "None") |
 | `dotnet_version` | .NET version detected |
 | `dotnet_cgroup_v2_compatible` | "Yes", "No", "Unknown", or "N/A" |
+| `go_binary` | Paths to Go binaries found (or "None") |
+| `go_version` | Go version(s) detected (e.g., "go1.22.5") |
+| `go_cgroup_v2_compatible` | "Yes", "No", "Needs Review", or "None" |
+| `go_modules` | Pipe-separated cgroup-relevant Go modules with versions (e.g., `go.uber.org/automaxprocs@v1.6.0`). Only v2-aware modules are listed |
 | `deep_scan_match` | `"true"` if cgroup v1 patterns found, `"false"` if scanned with no matches, empty if not scanned |
 | `deep_scan_confidence` | Highest confidence level: `"high"`, `"medium"`, or `"low"` (empty if no match) |
 | `deep_scan_sources` | Pipe-separated file paths where matches were found (e.g., `/entrypoint.sh\|/opt/helpers.sh` or `binary:/usr/bin/cadvisor`) |
 | `deep_scan_patterns` | Pipe-separated cgroup v1 patterns matched (e.g., `memory.limit_in_bytes\|cpu.cfs_quota_us`) |
 | `deep_scan_v2_aware` | `"true"` if matched files also contain cgroup v2 patterns, `"false"` if v1-only, empty if no match |
-| `deep_scan_go_cgroup_libs` | Pipe-separated Go package paths that interact with cgroups (e.g., `github.com/prometheus/procfs\|github.com/containerd/cgroups`). Informational — these libraries may use v1 or v2 |
 | `analysis_error` | Error message if analysis failed |
 
 ### Identifying Incompatible Images
@@ -748,12 +789,19 @@ The fields that indicate cgroups v2 incompatibility are:
 - **`java_cgroup_v2_compatible`**: If set to **"No"**, the Java runtime in the image is NOT compatible with cgroup v2
 - **`node_cgroup_v2_compatible`**: If set to **"No"**, the Node.js runtime in the image is NOT compatible with cgroup v2
 - **`dotnet_cgroup_v2_compatible`**: If set to **"No"**, the .NET runtime in the image is NOT compatible with cgroup v2
+- **`go_cgroup_v2_compatible`**: If set to **"No"**, the Go binary in the image is NOT compatible with cgroup v2. If **"Needs Review"**, the binary has a v2-aware module but at a version below the minimum threshold
 
-Possible values for these fields:
+Possible values for Java/Node.js/.NET fields:
 - `Yes` - The runtime is compatible with cgroup v2
 - `No` - The runtime is **NOT** compatible with cgroup v2 and requires an upgrade
 - `Unknown` - The runtime was found but its version could not be determined (e.g. the binary failed to execute inside the container)
 - `N/A` - The runtime was not found in the image
+
+Possible values for `go_cgroup_v2_compatible`:
+- `Yes` - The Go binary is compatible with cgroup v2 (Go >= 1.19, or older Go with a v2-aware module at sufficient version)
+- `No` - The Go binary is **NOT** compatible with cgroup v2 (Go < 1.19 with no v2-aware modules)
+- `Needs Review` - The Go binary has a v2-aware module but the module version is below the minimum required for v2 support
+- `None` - No Go binary was found in the image (or Go scanning was disabled)
 
 #### Deep Scan Fields
 
@@ -995,13 +1043,15 @@ image-cgroupsv2-inspector/
 │   ├── analysis_orchestrator.py # Source-agnostic analysis orchestration (NEW in v2.0)
 │   ├── auth_utils.py           # Registry auth.json generation (NEW in v2.0)
 │   ├── image_analyzer.py       # Image analysis for cgroups v2
-│   ├── deep_scan.py            # Deep-scan heuristic cgroup v1 detection (NEW)
+│   ├── go_scan.py              # Deterministic Go binary cgroups v2 scanning (NEW)
+│   ├── deep_scan.py            # Deep-scan heuristic cgroup v1 detection
 │   ├── rootfs_manager.py       # RootFS directory management
 │   └── system_checks.py        # System requirements verification
 ├── tests/
 │   ├── __init__.py
 │   ├── test_image_analyzer.py
-│   ├── test_deep_scan.py             # NEW
+│   ├── test_go_scan.py              # NEW
+│   ├── test_deep_scan.py
 │   ├── test_image_collector.py
 │   ├── test_openshift_client.py
 │   ├── test_quay_client.py           # NEW in v2.0

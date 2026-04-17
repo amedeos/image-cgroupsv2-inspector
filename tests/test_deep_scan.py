@@ -10,7 +10,6 @@ from src.deep_scan import (
     CGROUPV1_REGEX,
     CGROUPV2_FILE_NAMES,
     CGROUPV2_REGEX,
-    GO_CGROUP_PACKAGES,
     _extract_sourced_paths,
     _is_elf_binary,
     _is_shell_script,
@@ -18,7 +17,6 @@ from src.deep_scan import (
     _run_strings,
     find_cgroupv1_patterns,
     find_cgroupv2_patterns,
-    find_go_cgroup_deps,
     run_deep_scan,
     scan_binary_strings,
     scan_entrypoint_scripts,
@@ -663,7 +661,7 @@ MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
 """,
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -674,7 +672,7 @@ exec "$@"
         assert v2_aware is False
 
     def test_without_entrypoint(self, tmp_path):
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=None,
@@ -695,7 +693,7 @@ else
 fi
 """,
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -706,7 +704,7 @@ fi
 
     def test_debug_does_not_crash(self, tmp_path):
         """Debug mode should not raise exceptions."""
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             debug=True,
@@ -791,7 +789,7 @@ class TestScanBinaryStrings:
                 "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
             ],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert all(m.confidence == "low" for m in matches)
         assert all(m.source.startswith("binary:") for m in matches)
@@ -807,7 +805,7 @@ class TestScanBinaryStrings:
                 "memory.max_is_a_long_enough_string",
             ],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
         assert len(matches) > 0
         assert v2_aware is True
 
@@ -816,19 +814,19 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "cleanapp",
             ["just_some_random_long_string_here", "another_normal_string_data"],
         )
-        matches, v2_aware, _ = scan_binary_strings(tmp_path, ["/usr/bin/cleanapp"], debug=False)
+        matches, v2_aware = scan_binary_strings(tmp_path, ["/usr/bin/cleanapp"], debug=False)
         assert matches == []
         assert v2_aware is False
 
     def test_nonexistent_binary_skipped(self, tmp_path):
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/nonexistent"], debug=False)
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/nonexistent"], debug=False)
         assert matches == []
 
     def test_shell_script_skipped(self, tmp_path):
         script = tmp_path / "usr" / "bin" / "run.sh"
         script.parent.mkdir(parents=True)
         script.write_text("#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes")
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/run.sh"], debug=False)
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/run.sh"], debug=False)
         assert matches == []
 
     def test_multiple_binaries(self, tmp_path):
@@ -840,7 +838,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "app2",
             ["/sys/fs/cgroup/cpu/cpu.cfs_quota_us"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
         assert len(matches) >= 2
         sources = {m.source for m in matches}
         assert "binary:/usr/bin/app1" in sources
@@ -851,7 +849,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False)
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/bin/myapp", "/usr/bin/myapp"], debug=False)
         pattern_count = sum(1 for m in matches if m.pattern == "memory.limit_in_bytes")
         assert pattern_count == 1
 
@@ -861,7 +859,7 @@ class TestScanBinaryStrings:
             tmp_path / "usr" / "local" / "bin" / "cgroup-reader",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = scan_binary_strings(tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False)
+        matches, _ = scan_binary_strings(tmp_path, ["/usr/local/bin/cgroup-reader"], debug=False)
         assert len(matches) > 0
         assert matches[0].source == "binary:/usr/local/bin/cgroup-reader"
 
@@ -892,7 +890,7 @@ class TestRunDeepScanWithBinary:
                 "/sys/fs/cgroup/cpuacct/cpuacct.usage",
             ],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="cadvisor:v0.44.0",
             entrypoint=["/usr/bin/cadvisor"],
@@ -911,7 +909,7 @@ MEM=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
 exec "$@"
 """,
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -931,7 +929,7 @@ exec "$@"
                 "memory.max_and_some_padding",
             ],
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="monitor:latest",
             entrypoint=["/usr/bin/monitor"],
@@ -953,7 +951,7 @@ exec "$@"
             tmp_path / "usr" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/wrapper.sh"],
@@ -970,7 +968,7 @@ exec "$@"
             tmp_path / "usr" / "bin" / "nginx",
             ["welcome_to_nginx_server", "http_proxy_module_loaded"],
         )
-        matches, v2_aware, _ = run_deep_scan(
+        matches, v2_aware = run_deep_scan(
             extract_path=tmp_path,
             image_name="nginx:latest",
             entrypoint=["/usr/bin/nginx"],
@@ -995,7 +993,7 @@ exec /usr/local/bin/myapp
                 "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
             ],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1018,7 +1016,7 @@ exec /usr/local/bin/myapp
             tmp_path / "usr" / "local" / "bin" / "myapp",
             ["/sys/fs/cgroup/memory/memory.limit_in_bytes"],
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1050,7 +1048,7 @@ echo hello
 exec "$@"
 """,
         )
-        matches, _, _ = run_deep_scan(
+        matches, _ = run_deep_scan(
             extract_path=tmp_path,
             image_name="test:latest",
             entrypoint=["/entrypoint.sh"],
@@ -1058,150 +1056,3 @@ exec "$@"
             debug=False,
         )
         assert not any("binary:/bin/bash" in m.source for m in matches)
-
-
-class TestGoCgroupPackages:
-    """Verify Go package constants are well-formed."""
-
-    def test_no_duplicates(self):
-        assert len(GO_CGROUP_PACKAGES) == len(set(GO_CGROUP_PACKAGES))
-
-    def test_all_contain_slash_or_runtime(self):
-        for pkg in GO_CGROUP_PACKAGES:
-            assert "/" in pkg or pkg.startswith("runtime/"), f"{pkg} should contain / or start with runtime/"
-
-
-class TestFindGoCgroupDeps:
-    """Tests for find_go_cgroup_deps()."""
-
-    def test_empty_string(self):
-        assert find_go_cgroup_deps("") == []
-
-    def test_finds_procfs(self):
-        text = """
-runtime.goexit
-github.com/prometheus/procfs
-net/http
-"""
-        result = find_go_cgroup_deps(text)
-        assert "github.com/prometheus/procfs" in result
-
-    def test_finds_multiple_packages(self):
-        text = """
-github.com/opencontainers/runc/libcontainer/cgroups
-github.com/prometheus/procfs
-go.uber.org/automaxprocs
-"""
-        result = find_go_cgroup_deps(text)
-        assert len(result) == 3
-
-    def test_no_match_on_unrelated_packages(self):
-        text = """
-github.com/gorilla/mux
-golang.org/x/net
-encoding/json
-"""
-        assert find_go_cgroup_deps(text) == []
-
-    def test_deduplicated(self):
-        text = """
-github.com/prometheus/procfs
-github.com/prometheus/procfs/internal
-github.com/prometheus/procfs
-"""
-        result = find_go_cgroup_deps(text)
-        assert result.count("github.com/prometheus/procfs") == 1
-
-    def test_cadvisor_packages(self):
-        text = """
-github.com/google/cadvisor/container
-github.com/google/cadvisor/cgroup
-"""
-        result = find_go_cgroup_deps(text)
-        assert "github.com/google/cadvisor/container" in result
-        assert "github.com/google/cadvisor/cgroup" in result
-
-    def test_containerd_cgroups(self):
-        text = "github.com/containerd/cgroups"
-        result = find_go_cgroup_deps(text)
-        assert "github.com/containerd/cgroups" in result
-
-    def test_automaxprocs(self):
-        text = "go.uber.org/automaxprocs"
-        result = find_go_cgroup_deps(text)
-        assert "go.uber.org/automaxprocs" in result
-
-
-class TestScanBinaryStringsGoDeps:
-    """Tests for Go dep detection in scan_binary_strings."""
-
-    def _create_binary_with_strings(self, path: Path, embedded_strings: list[str]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        content = b"\x7fELF" + b"\x00" * 100
-        for s in embedded_strings:
-            content += s.encode("utf-8") + b"\x00" * 10
-        content += b"\x00" * 100
-        path.write_bytes(content)
-
-    def test_go_deps_returned(self, tmp_path):
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "exporter",
-            [
-                "github.com/prometheus/procfs",
-                "net/http.ListenAndServe",
-            ],
-        )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
-        assert "github.com/prometheus/procfs" in go_libs
-
-    def test_go_deps_without_v1_patterns(self, tmp_path):
-        """Binary with Go cgroup libs but no direct v1 patterns."""
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "exporter",
-            [
-                "github.com/prometheus/procfs",
-                "just_some_normal_long_text_here",
-            ],
-        )
-        matches, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/exporter"], debug=False)
-        assert matches == []
-        assert "github.com/prometheus/procfs" in go_libs
-
-    def test_go_deps_with_v1_patterns(self, tmp_path):
-        """Binary with both Go cgroup libs AND v1 patterns."""
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "cadvisor",
-            [
-                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-                "github.com/google/cadvisor/container",
-                "github.com/opencontainers/runc/libcontainer/cgroups",
-            ],
-        )
-        matches, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/cadvisor"], debug=False)
-        assert len(matches) > 0
-        assert len(go_libs) >= 2
-
-    def test_no_go_deps_in_non_go_binary(self, tmp_path):
-        """C binary without Go packages."""
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "myapp",
-            [
-                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-                "libc.so.6_is_a_long_string",
-            ],
-        )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/myapp"], debug=False)
-        assert go_libs == []
-
-    def test_go_deps_deduplicated_across_binaries(self, tmp_path):
-        """Same Go package in two binaries should appear once."""
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "app1",
-            ["github.com/prometheus/procfs"],
-        )
-        self._create_binary_with_strings(
-            tmp_path / "usr" / "bin" / "app2",
-            ["github.com/prometheus/procfs"],
-        )
-        _, _, go_libs = scan_binary_strings(tmp_path, ["/usr/bin/app1", "/usr/bin/app2"], debug=False)
-        assert go_libs.count("github.com/prometheus/procfs") == 1

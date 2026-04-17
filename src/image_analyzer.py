@@ -1,6 +1,6 @@
 """
 Image Analyzer Module
-Analyzes container images for Java, NodeJS, and .NET binaries to check cgroup v2 compatibility.
+Analyzes container images for Java, NodeJS, .NET, and Go binaries to check cgroup v2 compatibility.
 
 Supported runtimes and minimum versions for cgroup v2:
 - OpenJDK / HotSpot: jdk8u372, 11.0.16, 15 and later
@@ -8,6 +8,7 @@ Supported runtimes and minimum versions for cgroup v2:
 - IBM Semeru Runtimes: jdk8u345-b01, 11.0.16.0, 17.0.4.0, 18.0.2.0 and later
 - IBM SDK Java Technology Edition (IBM Java): 8.0.7.15 and later
 - .NET: 5.0 and later
+- Go: 1.19 and later (native runtime support), or earlier with v2-aware cgroup modules
 """
 
 import contextlib
@@ -51,9 +52,9 @@ class ImageAnalysisResult:
     java_binaries: list[BinaryInfo] = field(default_factory=list)
     node_binaries: list[BinaryInfo] = field(default_factory=list)
     dotnet_binaries: list[BinaryInfo] = field(default_factory=list)
+    go_binaries: list = field(default_factory=list)  # list[GoBinaryInfo]
     deep_scan_matches: list[DeepScanMatch] = field(default_factory=list)
     deep_scan_v2_aware_flag: bool = False
-    deep_scan_go_cgroup_libs_list: list[str] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -129,6 +130,51 @@ class ImageAnalysisResult:
         return "Yes" if compatible else "No"
 
     @property
+    def go_found(self) -> str:
+        """Return semicolon-separated list of Go binaries found."""
+        if not self.go_binaries:
+            return "None"
+        return "; ".join([b.path for b in self.go_binaries])
+
+    @property
+    def go_versions(self) -> str:
+        """Return semicolon-separated list of Go versions."""
+        if not self.go_binaries:
+            return "None"
+        return "; ".join([b.go_version for b in self.go_binaries])
+
+    @property
+    def go_compatible(self) -> str:
+        """Return compatibility status for Go."""
+        if not self.go_binaries:
+            return "N/A"
+        has_needs_review = any(
+            b.is_compatible is None and "needs review" in b.compliance_reason for b in self.go_binaries
+        )
+        has_unknown = any(
+            b.is_compatible is None and "needs review" not in b.compliance_reason for b in self.go_binaries
+        )
+        if has_unknown:
+            return "Unknown"
+        if has_needs_review:
+            return "Needs Review"
+        compatible = all(b.is_compatible for b in self.go_binaries)
+        if compatible:
+            return "Yes"
+        return "No"
+
+    @property
+    def go_modules_str(self) -> str:
+        """Return pipe-separated module info across all Go binaries."""
+        if not self.go_binaries:
+            return "None"
+        all_mods = []
+        for b in self.go_binaries:
+            for mod, ver in b.modules.items():
+                all_mods.append(f"{mod} {ver}")
+        return "|".join(all_mods) if all_mods else "None"
+
+    @property
     def deep_scan_match(self) -> str:
         """Return 'true' if any cgroup v1 pattern was found, 'false' otherwise, '' if not scanned."""
         if not hasattr(self, "deep_scan_matches") or self.deep_scan_matches is None:
@@ -175,16 +221,6 @@ class ImageAnalysisResult:
         if not self.deep_scan_matches:
             return ""
         return "true" if self.deep_scan_v2_aware_flag else "false"
-
-    @property
-    def deep_scan_go_cgroup_libs(self) -> str:
-        """Return pipe-separated Go cgroup library paths detected in binaries.
-
-        Empty string if no deep scan was performed or no libraries detected.
-        """
-        if not self.deep_scan_go_cgroup_libs_list:
-            return ""
-        return "|".join(self.deep_scan_go_cgroup_libs_list)
 
 
 class ImageAnalyzer:
@@ -249,6 +285,7 @@ class ImageAnalyzer:
         internal_registry_route: str | None = None,
         openshift_token: str | None = None,
         deep_scan: bool = False,
+        go_scan: bool = False,
     ):
         """
         Initialize the image analyzer.
@@ -263,6 +300,7 @@ class ImageAnalyzer:
             openshift_token: Bearer token for authenticating to the internal
                 registry route via ``podman login``.
             deep_scan: Enable heuristic deep-scan for cgroup v1 references.
+            go_scan: Enable deterministic Go binary scanning via ``go version``.
         """
         self.rootfs_base = Path(rootfs_base_path).resolve()
         self.rootfs_path = self.rootfs_base / "rootfs"
@@ -270,6 +308,7 @@ class ImageAnalyzer:
         self.internal_registry_route = internal_registry_route
         self.openshift_token = openshift_token
         self.deep_scan = deep_scan
+        self.go_scan = go_scan
         self._registry_logged_in = False
 
         # Ensure rootfs directory exists
@@ -1272,13 +1311,63 @@ class ImageAnalyzer:
                     )
                 )
 
+            # Extract entrypoint/cmd if needed for Go scan or deep-scan
+            entrypoint = None
+            cmd = None
+            if self.go_scan or self.deep_scan:
+                entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
+
+            if self.go_scan:
+                logger.debug("Searching for Go binaries...")
+                print("    Searching for Go binaries...")
+                from .go_scan import (
+                    GO_V2_AWARE_MODULES,
+                    GoBinaryInfo,
+                    check_go_compatibility,
+                    find_go_binaries,
+                    get_go_module_info,
+                )
+
+                go_binary_infos = find_go_binaries(extract_path, entrypoint, cmd, debug=debug)
+
+                for container_path, extracted_path, go_ver in go_binary_infos:
+                    modules = get_go_module_info(extracted_path, debug=debug)
+
+                    cgroup_modules = {mod: ver for mod, ver in modules.items() if mod in GO_V2_AWARE_MODULES}
+
+                    is_compatible, reason = check_go_compatibility(go_ver, modules)
+
+                    result.go_binaries.append(
+                        GoBinaryInfo(
+                            path=container_path,
+                            go_version=go_ver,
+                            modules=cgroup_modules,
+                            is_compatible=is_compatible,
+                            compliance_reason=reason,
+                        )
+                    )
+
+                if result.go_binaries:
+                    for gb in result.go_binaries:
+                        compat_icon = "✓" if gb.is_compatible else ("?" if gb.is_compatible is None else "✗")
+                        logger.debug(
+                            "Go binary %s: %s [%s] %s", gb.path, gb.go_version, compat_icon, gb.compliance_reason
+                        )
+                        print(f"      {compat_icon} {gb.path}: {gb.go_version} — {gb.compliance_reason}")
+                        if gb.modules:
+                            mods_str = ", ".join(f"{m} {v}" for m, v in gb.modules.items())
+                            logger.debug("  cgroup modules: %s", mods_str)
+                            print(f"        📦 {mods_str}")
+                else:
+                    logger.debug("No Go binaries found")
+                    print("    No Go binaries found")
+
             if self.deep_scan:
                 logger.debug("Running deep-scan for cgroup v1 references...")
                 print("    Running deep-scan for cgroup v1 references...")
-                entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
                 from .deep_scan import run_deep_scan
 
-                deep_matches, v2_aware, go_libs = run_deep_scan(
+                deep_matches, v2_aware = run_deep_scan(
                     extract_path=extract_path,
                     image_name=podman_image,
                     entrypoint=entrypoint,
@@ -1287,7 +1376,6 @@ class ImageAnalyzer:
                 )
                 result.deep_scan_matches = deep_matches
                 result.deep_scan_v2_aware_flag = v2_aware
-                result.deep_scan_go_cgroup_libs_list = go_libs
 
             if result.java_binaries:
                 for b in result.java_binaries:
@@ -1330,15 +1418,9 @@ class ImageAnalyzer:
                     patterns_str = ", ".join(dict.fromkeys(m.pattern for m in src_matches))
                     logger.debug("  [%s] %s: %s", src_matches[0].confidence, src, patterns_str)
                     print(f"        [{src_matches[0].confidence}] {src}: {patterns_str}")
-                if result.deep_scan_go_cgroup_libs_list:
-                    logger.debug("Go cgroup libraries: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
-                    print(f"      📦 Go cgroup libraries: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
             elif self.deep_scan:
                 logger.debug("Deep-scan: no cgroup v1 references found")
                 print("      ✓ Deep-scan: no cgroup v1 references found")
-                if result.deep_scan_go_cgroup_libs_list:
-                    logger.debug("Go cgroup libraries detected: %s", ", ".join(result.deep_scan_go_cgroup_libs_list))
-                    print(f"      📦 Go cgroup libraries detected: {', '.join(result.deep_scan_go_cgroup_libs_list)}")
 
             if not result.java_binaries and not result.node_binaries and not result.dotnet_binaries:
                 logger.debug("No Java, Node.js, or .NET binaries found")
