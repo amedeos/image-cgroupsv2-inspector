@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cgroup v2 report — {{ metadata.target }}</title>
+<style>
+{% include "assets/datatables.min.css" %}
+</style>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; color: #222; }
+header { border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 20px; }
+header h1 { margin: 0 0 10px 0; }
+dl.meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
+dl.meta dt { font-weight: bold; color: #666; }
+dl.meta dd { margin: 0; }
+.cards { display: flex; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+.card { padding: 14px 20px; border-radius: 8px; background: #f4f4f4; min-width: 100px; text-align: center; }
+.card .num { display: block; font-size: 28px; font-weight: bold; }
+.card .label { display: block; font-size: 12px; text-transform: uppercase; color: #666; }
+.card.ok { background: #d4edda; }
+.card.ko { background: #f8d7da; }
+.card.warn { background: #fff3cd; }
+.card.muted { background: #e2e3e5; }
+.compat-summary { border-collapse: collapse; margin: 10px 0; }
+.compat-summary th, .compat-summary td { padding: 6px 12px; border: 1px solid #ddd; text-align: right; }
+.compat-summary th:first-child, .compat-summary td:first-child { text-align: left; }
+.status-compatible { color: #155724; font-weight: bold; }
+.status-incompatible { color: #721c24; font-weight: bold; }
+.status-needs_review { color: #856404; font-weight: bold; }
+.status-unknown { color: #666; }
+td.used-by-cell { cursor: pointer; }
+td.used-by-cell:hover { background: #f0f0f0; }
+.consumers-table { margin: 10px 0; border-collapse: collapse; width: 100%; }
+.consumers-table th, .consumers-table td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; }
+.consumers-table th { background: #f8f8f8; }
+section { margin: 30px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>cgroup v2 compatibility report</h1>
+  <dl class="meta">
+    <dt>Target</dt><dd>{{ metadata.target }}</dd>
+    <dt>Source mode</dt><dd>{{ metadata.source_mode }}</dd>
+    <dt>Generated at</dt><dd>{{ metadata.generated_at }}</dd>
+    <dt>Tool version</dt><dd>{{ metadata.tool_version }}</dd>
+    <dt>CSV file</dt><dd>{{ metadata.csv_filename }}</dd>
+  </dl>
+</header>
+
+<section id="summary">
+  <h2>Summary</h2>
+  <div class="cards">
+    <div class="card"><span class="num">{{ summary.total_images }}</span><span class="label">Images</span></div>
+    <div class="card ok"><span class="num">{{ summary.by_overall_status.compatible }}</span><span class="label">Compatible</span></div>
+    <div class="card ko"><span class="num">{{ summary.by_overall_status.incompatible }}</span><span class="label">Incompatible</span></div>
+    <div class="card warn"><span class="num">{{ summary.by_overall_status.needs_review }}</span><span class="label">Needs review</span></div>
+    <div class="card muted"><span class="num">{{ summary.by_overall_status.unknown }}</span><span class="label">Unknown</span></div>
+  </div>
+
+  <h3>By runtime</h3>
+  <table class="compat-summary">
+    <thead><tr><th>Runtime</th><th>Yes</th><th>No</th><th>Unknown / Needs review</th><th>N/A</th></tr></thead>
+    <tbody>
+      <tr><td>Java</td><td>{{ summary.by_compatibility.java.yes }}</td><td>{{ summary.by_compatibility.java.no }}</td><td>{{ summary.by_compatibility.java.unknown }}</td><td>{{ summary.by_compatibility.java.na }}</td></tr>
+      <tr><td>Node.js</td><td>{{ summary.by_compatibility.node.yes }}</td><td>{{ summary.by_compatibility.node.no }}</td><td>{{ summary.by_compatibility.node.unknown }}</td><td>{{ summary.by_compatibility.node.na }}</td></tr>
+      <tr><td>.NET</td><td>{{ summary.by_compatibility.dotnet.yes }}</td><td>{{ summary.by_compatibility.dotnet.no }}</td><td>{{ summary.by_compatibility.dotnet.unknown }}</td><td>{{ summary.by_compatibility.dotnet.na }}</td></tr>
+      <tr><td>Go</td><td>{{ summary.by_compatibility.go.yes }}</td><td>{{ summary.by_compatibility.go.no }}</td><td>{{ summary.by_compatibility.go.needs_review }}</td><td>{{ summary.by_compatibility.go.none }}</td></tr>
+    </tbody>
+  </table>
+
+  {% if summary.deep_scan.enabled %}
+  <h3>Deep scan</h3>
+  <ul>
+    <li>Matches: {{ summary.deep_scan.matches }}</li>
+    <li>v1-only (likely incompatible): {{ summary.deep_scan.v1_only }}</li>
+    <li>v2-aware (likely safe): {{ summary.deep_scan.v2_aware }}</li>
+    <li>By confidence: high={{ summary.deep_scan.by_confidence.high }}, medium={{ summary.deep_scan.by_confidence.medium }}, low={{ summary.deep_scan.by_confidence.low }}</li>
+  </ul>
+  {% endif %}
+</section>
+
+<section id="images">
+  <h2>Images ({{ images|length }})</h2>
+  <table id="images-table" class="display">
+    <thead>
+      <tr>
+        <th>Image name</th>
+        <th>Used by</th>
+        <th>Java</th>
+        <th>Node.js</th>
+        <th>.NET</th>
+        <th>Go</th>
+        <th>Deep scan</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for img in images %}
+      <tr data-image="{{ img.image_name }}">
+        <td>{{ img.image_name }}</td>
+        <td class="used-by-cell">
+          <span class="used-by-count">{{ img.used_by_count }}</span>
+          <script type="application/json" class="consumers-data">{{ img.consumers|tojson }}</script>
+        </td>
+        <td>{{ img.java.compatible }}{% if img.java.version and img.java.version != "None" %} ({{ img.java.version }}){% endif %}</td>
+        <td>{{ img.node.compatible }}{% if img.node.version and img.node.version != "None" %} ({{ img.node.version }}){% endif %}</td>
+        <td>{{ img.dotnet.compatible }}{% if img.dotnet.version and img.dotnet.version != "None" %} ({{ img.dotnet.version }}){% endif %}</td>
+        <td>{{ img.go.compatible }}{% if img.go.version and img.go.version != "None" %} ({{ img.go.version }}){% endif %}</td>
+        <td>
+          {% if img.deep_scan.match %}
+          {{ img.deep_scan.confidence }}{% if img.deep_scan.v2_aware %} (v2-aware){% else %} (v1-only){% endif %}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td class="status-{{ img.overall_status }}">{{ img.overall_status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section id="errors">
+  <h2>Errors ({{ errors|length }})</h2>
+  {% if errors %}
+  <table id="errors-table" class="display">
+    <thead><tr><th>Image name</th><th>Error</th><th>Used by</th></tr></thead>
+    <tbody>
+      {% for err in errors %}
+      <tr>
+        <td>{{ err.image_name }}</td>
+        <td>{{ err.error }}</td>
+        <td>{{ err.consumers|length }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No errors.</p>
+  {% endif %}
+</section>
+
+<script>
+{% include "assets/datatables.min.js" %}
+</script>
+<script>
+$(document).ready(function() {
+  function formatConsumers(consumersJson) {
+    var consumers = JSON.parse(consumersJson);
+    if (!consumers.length) return '<em>No consumer details.</em>';
+    var html = '<table class="consumers-table"><thead><tr>' +
+      '<th>Source</th><th>Namespace</th><th>Object type</th><th>Object name</th>' +
+      '<th>Container</th><th>Registry org</th><th>Registry repo</th>' +
+      '</tr></thead><tbody>';
+    consumers.forEach(function(c) {
+      html += '<tr>' +
+        '<td>' + (c.source || '') + '</td>' +
+        '<td>' + (c.namespace || '') + '</td>' +
+        '<td>' + (c.object_type || '') + '</td>' +
+        '<td>' + (c.object_name || '') + '</td>' +
+        '<td>' + (c.container_name || '') + '</td>' +
+        '<td>' + (c.registry_org || '') + '</td>' +
+        '<td>' + (c.registry_repo || '') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  }
+
+  var table = $('#images-table').DataTable({
+    pageLength: 25,
+    order: [[7, 'asc']]
+  });
+
+  $('#images-table tbody').on('click', 'td.used-by-cell', function() {
+    var tr = $(this).closest('tr');
+    var row = table.row(tr);
+    if (row.child.isShown()) {
+      row.child.hide();
+      tr.removeClass('shown');
+    } else {
+      var jsonText = $(this).find('.consumers-data').text();
+      row.child(formatConsumers(jsonText)).show();
+      tr.addClass('shown');
+    }
+  });
+
+  if ($('#errors-table').length) {
+    $('#errors-table').DataTable({ pageLength: 10 });
+  }
+});
+</script>
+</body>
+</html>

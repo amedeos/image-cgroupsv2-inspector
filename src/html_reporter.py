@@ -1,4 +1,4 @@
-"""Pure data aggregation for the HTML report: reads the tool CSV and returns a structured dict."""
+"""Data aggregation and HTML rendering for the cgroup v2 compatibility report."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import csv
 import re
 from datetime import datetime
 from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 CSV_TIMESTAMP_SUFFIX_RE = re.compile(r"-\d{8}-\d{6}$")
 
@@ -229,3 +231,34 @@ def build_report_context(
         "images": images,
         "errors": errors,
     }
+
+
+def render_html_report(context: dict) -> str:
+    """Apply the Jinja2 template to the context and return HTML as a string.
+
+    Template file is ``src/templates/report.html.j2``.  Assets in
+    ``src/templates/assets/`` are inlined via ``{% include %}``.
+    """
+    template_dir = Path(__file__).parent / "templates"
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(["html", "j2"]),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("report.html.j2")
+    return template.render(context)
+
+
+def generate_html_report(
+    csv_path: Path,
+    html_path: Path,
+    tool_version: str,
+    target: str | None = None,
+    generated_at: str | None = None,
+) -> None:
+    """Build context from CSV, render to HTML, and write to *html_path*."""
+    context = build_report_context(csv_path, tool_version, target, generated_at)
+    html = render_html_report(context)
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(html)

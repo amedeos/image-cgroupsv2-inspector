@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.html_reporter import build_report_context
+from src.html_reporter import build_report_context, generate_html_report, render_html_report
 
 FIXTURE_CSV = Path("tests/fixtures/sample_report.csv")
 SNAPSHOT_PATH = Path("tests/fixtures/expected_context.json")
@@ -128,3 +128,61 @@ def test_build_context_empty_csv(tmp_path: Path):
     assert ctx["metadata"]["source_mode"] == "unknown"
     assert ctx["images"] == []
     assert ctx["errors"] == []
+
+
+# ---------------------------------------------------------------------------
+# HTML rendering tests
+# ---------------------------------------------------------------------------
+
+
+def test_render_html_contains_key_markers():
+    ctx = _ctx()
+    html = render_html_report(ctx)
+
+    assert '<table id="images-table"' in html
+    assert '<table id="errors-table"' in html
+    assert "sample-target" in html
+    assert "java-app" in html
+    assert "java-old" in html
+    assert "ds-v1only" in html
+    assert "manifest unknown" in html
+    assert "dataTables_wrapper" in html
+    assert "jQuery" in html
+
+
+def test_render_html_empty_csv(tmp_path: Path):
+    empty_csv = tmp_path / "empty.csv"
+    empty_csv.write_text(CSV_HEADER)
+    ctx = build_report_context(csv_path=empty_csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    html = render_html_report(ctx)
+
+    assert "No errors." in html
+    assert "Images (0)" in html
+
+
+def test_generate_html_report_writes_file(tmp_path: Path):
+    out = tmp_path / "report.html"
+    generate_html_report(
+        csv_path=FIXTURE_CSV,
+        html_path=out,
+        tool_version="2.0.0",
+        target="test-target",
+        generated_at=FIXED_TS,
+    )
+    assert out.exists()
+    content = out.read_text()
+    assert len(content) > 1024
+    assert content.startswith("<!DOCTYPE html>")
+
+
+def test_generate_html_report_creates_parent_dirs(tmp_path: Path):
+    out = tmp_path / "nested" / "deep" / "r.html"
+    generate_html_report(
+        csv_path=FIXTURE_CSV,
+        html_path=out,
+        tool_version="2.0.0",
+        target="test-target",
+        generated_at=FIXED_TS,
+    )
+    assert out.exists()
+    assert out.read_text().startswith("<!DOCTYPE html>")
