@@ -452,6 +452,25 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 - The state file tracks three categories: `completed_images`, `error_images`, and `timeout_images`
 - `--clean-state` deletes the state file and exits immediately (code `0`). Pass a target name (e.g. `--clean-state ocp-prod`) to skip the cluster/registry connection
 
+### HTML Report
+
+In addition to the CSV, the tool can generate a self-contained HTML report with a sortable, filterable table (DataTables) grouped by `image_name` and an expandable drill-down showing which workloads consume each image.
+
+The HTML is fully self-contained (all JS/CSS inlined) so it works offline in air-gapped environments.
+
+```bash
+# Generate HTML alongside CSV during a scan
+./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --html-report
+
+# Regenerate HTML from an existing CSV (offline, no scan)
+./image-cgroupsv2-inspector --report-only output/mycluster-20260417-120000.csv
+
+# With a custom output directory
+./image-cgroupsv2-inspector --report-only output/scan.csv --output-dir /tmp/reports
+```
+
+The HTML is written to `<output-dir>/html/<basename>.html` when `--output-dir` is used, otherwise next to the input CSV under `html/`.
+
 ### Command Line Options
 
 **OpenShift mode options:**
@@ -485,6 +504,8 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 | `--analyze` | Analyze images for Java/NodeJS/.NET/Go binaries (requires `--rootfs-path`) |
 | `--disable-go` | Disable Go binary scanning even when the `go` command is available on the host. By default, if `go` is found in `PATH`, Go scanning is enabled automatically |
 | `--deep-scan` | Enable heuristic deep-scan for cgroup v1 references in entrypoint scripts and binaries. Requires `--analyze`. Detects images that may not work on cgroup v2 systems even without Java/Node.js/.NET runtimes. Results appear in `deep_scan_*` CSV columns |
+| `--html-report` | Also generate an HTML report alongside the CSV. Written to `<output-dir>/html/<basename>.html` |
+| `--report-only CSV_PATH` | Regenerate the HTML report from an existing CSV file. Incompatible with `--analyze`, `--api-url`, `--registry-url` |
 | `--pull-secret` | Path to pull-secret file for image authentication (default: `.pull-secret`) |
 | `--verify-ssl` | Verify SSL certificates (default: False) |
 | `--env-file` | Path to .env file for credentials (default: `.env`) |

@@ -84,6 +84,9 @@ Registry Mode Examples:
   # Generate HTML report alongside CSV
   ./image-cgroupsv2-inspector --rootfs-path /tmp/images --analyze --html-report
 
+  # Regenerate HTML from an existing CSV (offline, no scan)
+  ./image-cgroupsv2-inspector --report-only output/mycluster-20260417-120000.csv
+
 Environment Variables (OpenShift Mode):
   OPENSHIFT_API_URL    OpenShift API URL
   OPENSHIFT_TOKEN      Bearer token for authentication
@@ -165,6 +168,18 @@ The tool will save credentials to .env file after successful connection.
         action="store_true",
         default=False,
         help="Also generate an HTML report alongside the CSV output. Written to <output-dir>/html/<basename>.html.",
+    )
+
+    parser.add_argument(
+        "--report-only",
+        dest="report_only",
+        type=str,
+        default=None,
+        metavar="CSV_PATH",
+        help="Regenerate an HTML report from an existing CSV file (offline mode). "
+        "No scan is performed. Incompatible with --analyze, --api-url, "
+        "--registry-url. Output goes to <output-dir>/html/<basename>.html if "
+        "--output-dir is specified, otherwise to <csv-dir>/html/<basename>.html.",
     )
 
     parser.add_argument(
@@ -546,6 +561,63 @@ def _maybe_generate_html_report(
         logger.exception("Failed to generate HTML report")
 
 
+def _run_report_only(args, logger: logging.Logger) -> int:
+    """Handle --report-only mode: regenerate HTML from existing CSV.
+
+    Returns exit code (0 on success, 1 on error).
+    """
+    csv_path = Path(args.report_only)
+
+    if not csv_path.exists():
+        print(f"\n✗ Error: CSV file not found: {csv_path}")
+        logger.error("CSV file not found: %s", csv_path)
+        return 1
+    if not csv_path.is_file():
+        print(f"\n✗ Error: not a file: {csv_path}")
+        logger.error("Not a file: %s", csv_path)
+        return 1
+    if csv_path.suffix.lower() != ".csv":
+        print(f"\n✗ Error: expected a .csv file, got: {csv_path.suffix}")
+        logger.error("Expected .csv file: %s", csv_path)
+        return 1
+
+    incompatible = []
+    if args.analyze:
+        incompatible.append("--analyze")
+    if args.api_url:
+        incompatible.append("--api-url")
+    if args.registry_url:
+        incompatible.append("--registry-url")
+    if incompatible:
+        print(f"\n✗ Error: --report-only is incompatible with: {', '.join(incompatible)}")
+        logger.error("Incompatible flags with --report-only: %s", incompatible)
+        return 1
+
+    default_output_dir = "output"
+    if args.output_dir != default_output_dir:
+        html_dir = Path(args.output_dir) / "html"
+    else:
+        html_dir = csv_path.parent / "html"
+
+    html_path = html_dir / f"{csv_path.stem}.html"
+
+    try:
+        generate_html_report(
+            csv_path=csv_path,
+            html_path=html_path,
+            tool_version=TOOL_VERSION,
+            target=None,
+        )
+    except Exception as exc:
+        print(f"\n✗ Error: failed to generate HTML report: {exc}")
+        logger.exception("Failed to generate HTML report in report-only mode")
+        return 1
+
+    print(f"\n✓ HTML report generated: {html_path}")
+    logger.info("HTML report generated: %s", html_path)
+    return 0
+
+
 def _build_state_file_path(target: str, state_dir: str) -> str:
     """Return the full path to the state file for *target*."""
     return str(Path(state_dir) / ScanState.build_state_filename(target))
@@ -582,6 +654,9 @@ def main() -> int:
     logger.info("=" * 60)
     logger.info("image-cgroupsv2-inspector started")
     logger.info("=" * 60)
+
+    if args.report_only is not None:
+        return _run_report_only(args, logger)
 
     logger.info("Running system checks...")
     if not run_system_checks(verbose=args.verbose, deep_scan=args.deep_scan):

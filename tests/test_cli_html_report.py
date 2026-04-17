@@ -80,3 +80,106 @@ def test_maybe_generate_html_report_survives_errors(tmp_path):
         enabled=True,
         logger=logging.getLogger("test"),
     )
+
+
+# ---------------------------------------------------------------------------
+# --report-only tests
+# ---------------------------------------------------------------------------
+
+
+def test_report_only_generates_html(tmp_path):
+    """--report-only against an existing CSV generates HTML and exits 0."""
+    csv_dst = tmp_path / "mycluster-20260417-120000.csv"
+    csv_dst.write_bytes(Path("tests/fixtures/sample_report.csv").read_bytes())
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "image-cgroupsv2-inspector",
+            "--report-only",
+            str(csv_dst),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    expected_html = tmp_path / "html" / "mycluster-20260417-120000.html"
+    assert expected_html.exists()
+    assert expected_html.stat().st_size > 1024
+
+
+def test_report_only_with_output_dir(tmp_path):
+    """--report-only respects --output-dir."""
+    csv_dst = tmp_path / "scan.csv"
+    csv_dst.write_bytes(Path("tests/fixtures/sample_report.csv").read_bytes())
+    custom_out = tmp_path / "custom_output"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "image-cgroupsv2-inspector",
+            "--report-only",
+            str(csv_dst),
+            "--output-dir",
+            str(custom_out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    expected_html = custom_out / "html" / "scan.html"
+    assert expected_html.exists()
+
+
+def test_report_only_missing_file(tmp_path):
+    """--report-only with a non-existent file exits 1."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "image-cgroupsv2-inspector",
+            "--report-only",
+            str(tmp_path / "does-not-exist.csv"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "not found" in result.stdout.lower() or "not found" in result.stderr.lower()
+
+
+def test_report_only_rejects_analyze(tmp_path):
+    """--report-only is incompatible with --analyze."""
+    csv_dst = tmp_path / "scan.csv"
+    csv_dst.write_bytes(Path("tests/fixtures/sample_report.csv").read_bytes())
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "image-cgroupsv2-inspector",
+            "--report-only",
+            str(csv_dst),
+            "--analyze",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "incompatible" in result.stdout.lower() or "incompatible" in result.stderr.lower()
+
+
+def test_report_only_rejects_wrong_extension(tmp_path):
+    """--report-only rejects files that don't end in .csv."""
+    wrong = tmp_path / "scan.txt"
+    wrong.write_text("not a csv")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "image-cgroupsv2-inspector",
+            "--report-only",
+            str(wrong),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
