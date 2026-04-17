@@ -276,6 +276,19 @@ class ImageAnalyzer:
     IBM_SEMERU_PATTERN = re.compile(r"IBM Semeru", re.IGNORECASE)
     IBM_SDK_PATTERN = re.compile(r"IBM (?:J9|SDK)", re.IGNORECASE)
 
+    # Markers that identify a libc / dynamic-linker mismatch in podman/crun
+    # output. When a musl (Alpine) binary is run inside a glibc image (or
+    # vice versa), the OCI runtime reports something like:
+    #   exec container process (missing dynamic library?) `...`: No such file or directory
+    LIBC_MISMATCH_MARKERS = (
+        "missing dynamic library",
+    )
+
+    # Directory-name suffixes that identify a libc variant of a node
+    # installation (typically used by the GitHub Actions Runner and similar
+    # tooling that ships both glibc and musl builds side-by-side).
+    NODE_LIBC_VARIANT_SUFFIXES = ("_alpine", "_musl")
+
     INTERNAL_REGISTRY_SVC = "image-registry.openshift-image-registry.svc"
 
     def __init__(
@@ -980,6 +993,54 @@ class ImageAnalyzer:
         except Exception:
             return False
 
+    @staticmethod
+    def _looks_like_libc_mismatch(output: str) -> bool:
+        """Return True if *output* looks like a dynamic-linker / libc mismatch."""
+        return any(marker in output for marker in ImageAnalyzer.LIBC_MISMATCH_MARKERS)
+
+    def _infer_node_version_from_sibling(
+        self,
+        unknown_binary: "BinaryInfo",
+        all_binaries: list["BinaryInfo"],
+    ) -> tuple[str, bool | None] | None:
+        """Try to infer the version of an unresolved Node.js binary from a
+        sibling that was successfully resolved.
+
+        The relationship is purely structural: the unresolved binary's
+        container path must contain a directory component ending with a
+        known libc-variant suffix (e.g. ``node20_alpine``), and a sibling
+        binary must exist at the exact same path with that suffix stripped
+        (e.g. ``node20``).
+
+        Returns:
+            ``(version, is_compatible)`` from the resolved sibling, or
+            ``None`` if no sibling match is found.
+        """
+        path = unknown_binary.path
+
+        candidate_paths: set[str] = set()
+        parts = path.split("/")
+        for idx, component in enumerate(parts):
+            for suffix in self.NODE_LIBC_VARIANT_SUFFIXES:
+                if component.endswith(suffix) and component != suffix:
+                    stripped = component[: -len(suffix)]
+                    new_parts = parts.copy()
+                    new_parts[idx] = stripped
+                    candidate_paths.add("/".join(new_parts))
+
+        if not candidate_paths:
+            return None
+
+        for sibling in all_binaries:
+            if sibling is unknown_binary:
+                continue
+            if sibling.version == "unknown":
+                continue
+            if sibling.path in candidate_paths:
+                return sibling.version, sibling.is_compatible
+
+        return None
+
     def _get_dotnet_version_in_container(
         self, image_name: str, binary_path: str, debug: bool = False
     ) -> tuple[str, str]:
@@ -1275,6 +1336,36 @@ class ImageAnalyzer:
                         is_compatible=is_compatible,
                         runtime_type="NodeJS",
                     )
+                )
+
+            # Sibling-lookup fallback for Node.js binaries whose version
+            # could not be resolved by direct execution (typically musl/Alpine
+            # binaries inside a glibc image, or vice versa).
+            for b in result.node_binaries:
+                if b.version != "unknown":
+                    continue
+                if not self._looks_like_libc_mismatch(b.version_output):
+                    continue
+                inferred = self._infer_node_version_from_sibling(b, result.node_binaries)
+                if inferred is None:
+                    continue
+                inferred_version, inferred_compat = inferred
+                logger.debug(
+                    "Node.js: inferred version %s from sibling for %s (libc variant)",
+                    inferred_version,
+                    b.path,
+                )
+                if debug:
+                    print(
+                        f"      [DEBUG] Node.js: inferred {inferred_version} from sibling "
+                        f"for {b.path} (libc variant)"
+                    )
+                b.version = inferred_version
+                b.is_compatible = inferred_compat
+                b.version_output = (
+                    f"{b.version_output}\n"
+                    f"[sibling_inferred] version {inferred_version} propagated from "
+                    f"a resolved sibling binary (libc-variant mismatch)"
                 )
 
             logger.debug("Searching for .NET binaries...")

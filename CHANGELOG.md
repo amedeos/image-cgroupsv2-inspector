@@ -21,6 +21,15 @@ All notable changes to this project will be documented in this file.
   (`manifests/quay/quay-setup.sh`, `manifests/quay/quay-teardown.sh`)
 - Comprehensive unit tests for all new modules
 - CLI integration tests for registry mode
+- Node.js sibling-lookup fallback: when a `nodeXX_alpine` / `nodeXX_musl`
+  binary fails to execute due to a libc / dynamic-linker mismatch (e.g.
+  GitHub Actions Runner images shipping both glibc and musl builds
+  side-by-side), the version is now inferred from the paired glibc
+  sibling binary at the same installation path. This turns previously
+  "Unknown" rows into deterministic "Yes" / "No" cgroup v2 compatibility
+  verdicts. Cached state files are not invalidated: delete
+  `.state_<target>.json` manually to re-scan affected images with the
+  new logic.
 
 ### Changed
 - Main script now supports dual-mode operation
