@@ -99,7 +99,7 @@ def _compute_overall_status(runtime_data: dict, deep_scan_data: dict) -> str:
         return "needs_review"
     if has_yes:
         return "compatible"
-    return "unknown"
+    return "not_applicable"
 
 
 def _compute_source_mode(sources: set[str]) -> str:
@@ -172,7 +172,7 @@ def build_report_context(
             }
         )
 
-    by_overall = {"compatible": 0, "incompatible": 0, "needs_review": 0, "unknown": 0}
+    by_overall = {"compatible": 0, "incompatible": 0, "needs_review": 0, "not_applicable": 0}
     for img in images:
         by_overall[img["overall_status"]] += 1
 

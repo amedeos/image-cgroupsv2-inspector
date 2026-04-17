@@ -452,6 +452,51 @@
     {
       "consumers": [
         {
+          "container_name": "",
+          "namespace": "",
+          "object_name": "",
+          "object_type": "",
+          "registry_org": "myorg",
+          "registry_repo": "nginx-base",
+          "source": "registry"
+        }
+      ],
+      "deep_scan": {
+        "confidence": "",
+        "match": false,
+        "patterns": [],
+        "sources": [],
+        "v2_aware": null
+      },
+      "dotnet": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "go": {
+        "binary": "None",
+        "compatible": "N/A",
+        "modules": "None",
+        "version": "None"
+      },
+      "image_id": "sha256:kkk",
+      "image_name": "registry.example/myorg/nginx-base:v1",
+      "java": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "node": {
+        "binary": "None",
+        "compatible": "N/A",
+        "version": "None"
+      },
+      "overall_status": "not_applicable",
+      "used_by_count": 1
+    },
+    {
+      "consumers": [
+        {
           "container_name": "node-container",
           "namespace": "dev",
           "object_name": "node-app",
@@ -505,7 +550,7 @@
   "summary": {
     "by_compatibility": {
       "dotnet": {
-        "na": 9,
+        "na": 10,
         "no": 0,
         "unknown": 0,
         "yes": 1
@@ -513,17 +558,17 @@
       "go": {
         "needs_review": 1,
         "no": 1,
-        "none": 6,
+        "none": 7,
         "yes": 2
       },
       "java": {
-        "na": 7,
+        "na": 8,
         "no": 1,
         "unknown": 1,
         "yes": 1
       },
       "node": {
-        "na": 9,
+        "na": 10,
         "no": 0,
         "unknown": 0,
         "yes": 1
@@ -533,7 +578,7 @@
       "compatible": 5,
       "incompatible": 3,
       "needs_review": 2,
-      "unknown": 0
+      "not_applicable": 1
     },
     "deep_scan": {
       "by_confidence": {
@@ -546,8 +591,8 @@
       "v1_only": 1,
       "v2_aware": 1
     },
-    "total_images": 10,
-    "total_rows": 13,
+    "total_images": 11,
+    "total_rows": 14,
     "with_errors": 1
   }
 }

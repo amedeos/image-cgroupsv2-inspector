@@ -76,6 +76,7 @@ def test_build_context_separates_errors():
         ("registry.example/myorg/ds-v1only:v1", "incompatible"),
         ("registry.example/myorg/ds-v2aware:v1", "compatible"),
         ("registry.example/myorg/java-unknown:v1", "needs_review"),
+        ("registry.example/myorg/nginx-base:v1", "not_applicable"),
     ],
 )
 def test_build_context_overall_status(image_name: str, expected_status: str):
@@ -148,6 +149,8 @@ def test_render_html_contains_key_markers():
     assert "manifest unknown" in html
     assert "dataTables_wrapper" in html
     assert "jQuery" in html
+    assert "status-not_applicable" in html
+    assert '<div class="card na">' in html
 
 
 def test_render_html_empty_csv(tmp_path: Path):
@@ -158,6 +161,24 @@ def test_render_html_empty_csv(tmp_path: Path):
 
     assert "No errors." in html
     assert "Images (0)" in html
+
+
+def test_build_context_not_applicable_for_runtimeless_image():
+    """An image with no detected runtime and no deep-scan match
+    is classified as 'not_applicable', not 'unknown'."""
+    ctx = build_report_context(
+        csv_path=Path("tests/fixtures/sample_report.csv"),
+        tool_version="2.0.0",
+        target="sample-target",
+        generated_at="2026-04-17T12:00:00",
+    )
+    nginx = next(img for img in ctx["images"] if img["image_name"] == "registry.example/myorg/nginx-base:v1")
+    assert nginx["overall_status"] == "not_applicable"
+    assert nginx["java"]["compatible"] == "N/A"
+    assert nginx["node"]["compatible"] == "N/A"
+    assert nginx["dotnet"]["compatible"] == "N/A"
+    assert nginx["go"]["compatible"] == "N/A"
+    assert nginx["deep_scan"]["match"] is False
 
 
 def test_generate_html_report_writes_file(tmp_path: Path):

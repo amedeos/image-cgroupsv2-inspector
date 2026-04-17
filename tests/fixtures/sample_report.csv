@@ -11,4 +11,5 @@ registry,,,,,myorg,go-review,registry.example/myorg/go-review:v1,sha256:ggg,None
 registry,,,,,myorg,ds-v1only,registry.example/myorg/ds-v1only:v1,sha256:hhh,None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,true,high,/entrypoint.sh,memory.limit_in_bytes,false,
 registry,,,,,myorg,ds-v2aware,registry.example/myorg/ds-v2aware:v1,sha256:iii,None,None,N/A,None,None,N/A,None,None,N/A,/usr/bin/cadvisor,go1.20.0,Yes,None,true,low,binary:/usr/bin/cadvisor,memory.limit_in_bytes|cpu.cfs_quota_us,true,
 registry,,,,,myorg,java-unknown,registry.example/myorg/java-unknown:v1,sha256:jjj,/usr/bin/java,None,Unknown,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,
+registry,,,,,myorg,nginx-base,registry.example/myorg/nginx-base:v1,sha256:kkk,None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,
 registry,,,,,myorg,broken-image,registry.example/myorg/broken:v1,,None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,podman pull failed: manifest unknown

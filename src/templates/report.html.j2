@@ -20,14 +20,14 @@ dl.meta dd { margin: 0; }
 .card.ok { background: #d4edda; }
 .card.ko { background: #f8d7da; }
 .card.warn { background: #fff3cd; }
-.card.muted { background: #e2e3e5; }
+.card.na { background: #e2e3e5; }
+.status-not_applicable { color: #666; }
 .compat-summary { border-collapse: collapse; margin: 10px 0; }
 .compat-summary th, .compat-summary td { padding: 6px 12px; border: 1px solid #ddd; text-align: right; }
 .compat-summary th:first-child, .compat-summary td:first-child { text-align: left; }
 .status-compatible { color: #155724; font-weight: bold; }
 .status-incompatible { color: #721c24; font-weight: bold; }
 .status-needs_review { color: #856404; font-weight: bold; }
-.status-unknown { color: #666; }
 td.used-by-cell { cursor: pointer; }
 td.used-by-cell:hover { background: #f0f0f0; }
 .consumers-table { margin: 10px 0; border-collapse: collapse; width: 100%; }
@@ -56,7 +56,7 @@ section { margin: 30px 0; }
     <div class="card ok"><span class="num">{{ summary.by_overall_status.compatible }}</span><span class="label">Compatible</span></div>
     <div class="card ko"><span class="num">{{ summary.by_overall_status.incompatible }}</span><span class="label">Incompatible</span></div>
     <div class="card warn"><span class="num">{{ summary.by_overall_status.needs_review }}</span><span class="label">Needs review</span></div>
-    <div class="card muted"><span class="num">{{ summary.by_overall_status.unknown }}</span><span class="label">Unknown</span></div>
+    <div class="card na"><span class="num">{{ summary.by_overall_status.not_applicable }}</span><span class="label">N/A</span></div>
   </div>
 
   <h3>By runtime</h3>
