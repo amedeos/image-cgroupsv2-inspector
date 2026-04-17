@@ -70,6 +70,13 @@ section { margin: 30px 0; }
 #filter-banner .tag .remove:hover { opacity: 1; }
 #filter-banner #clear-filters { margin-left: auto; background: transparent; border: 1px solid #0366d6; color: #0366d6; padding: 4px 12px; border-radius: 3px; cursor: pointer; font-size: 13px; }
 #filter-banner #clear-filters:hover { background: #0366d6; color: white; }
+
+/* --- Compat-summary interactive cells --- */
+.compat-summary td.compat-cell { cursor: pointer; user-select: none; transition: background 0.15s; }
+.compat-summary td.compat-cell:hover { background: #e7f3ff; }
+.compat-summary td.compat-cell:focus { outline: 2px solid #0366d6; outline-offset: -2px; }
+.compat-summary td.compat-cell.empty { cursor: default; color: #bbb; }
+.compat-summary td.compat-cell.empty:hover { background: transparent; }
 </style>
 </head>
 <body>
@@ -106,13 +113,46 @@ section { margin: 30px 0; }
       </div>
 
       <h3>By runtime</h3>
+      {% macro compat_cell(runtime, state, count) %}
+      {% if count > 0 %}
+      <td class="compat-cell" data-runtime="{{ runtime }}" data-state="{{ state }}"
+          tabindex="0" role="button"
+          aria-label="Filter to {{ runtime }} {{ state|replace('_', ' ') }}, {{ count }} images">{{ count }}</td>
+      {% else %}
+      <td class="compat-cell empty">0</td>
+      {% endif %}
+      {% endmacro %}
       <table class="compat-summary">
         <thead><tr><th>Runtime</th><th>Yes</th><th>No</th><th>Unknown / Needs review</th><th>N/A</th></tr></thead>
         <tbody>
-          <tr><td>Java</td><td>{{ summary.by_compatibility.java.yes }}</td><td>{{ summary.by_compatibility.java.no }}</td><td>{{ summary.by_compatibility.java.unknown }}</td><td>{{ summary.by_compatibility.java.na }}</td></tr>
-          <tr><td>Node.js</td><td>{{ summary.by_compatibility.node.yes }}</td><td>{{ summary.by_compatibility.node.no }}</td><td>{{ summary.by_compatibility.node.unknown }}</td><td>{{ summary.by_compatibility.node.na }}</td></tr>
-          <tr><td>.NET</td><td>{{ summary.by_compatibility.dotnet.yes }}</td><td>{{ summary.by_compatibility.dotnet.no }}</td><td>{{ summary.by_compatibility.dotnet.unknown }}</td><td>{{ summary.by_compatibility.dotnet.na }}</td></tr>
-          <tr><td>Go</td><td>{{ summary.by_compatibility.go.yes }}</td><td>{{ summary.by_compatibility.go.no }}</td><td>{{ summary.by_compatibility.go.needs_review }}</td><td>{{ summary.by_compatibility.go.none }}</td></tr>
+          <tr>
+            <td>Java</td>
+            {{ compat_cell('java', 'yes', summary.by_compatibility.java.yes) }}
+            {{ compat_cell('java', 'no', summary.by_compatibility.java.no) }}
+            {{ compat_cell('java', 'unknown', summary.by_compatibility.java.unknown) }}
+            {{ compat_cell('java', 'na', summary.by_compatibility.java.na) }}
+          </tr>
+          <tr>
+            <td>Node.js</td>
+            {{ compat_cell('node', 'yes', summary.by_compatibility.node.yes) }}
+            {{ compat_cell('node', 'no', summary.by_compatibility.node.no) }}
+            {{ compat_cell('node', 'unknown', summary.by_compatibility.node.unknown) }}
+            {{ compat_cell('node', 'na', summary.by_compatibility.node.na) }}
+          </tr>
+          <tr>
+            <td>.NET</td>
+            {{ compat_cell('dotnet', 'yes', summary.by_compatibility.dotnet.yes) }}
+            {{ compat_cell('dotnet', 'no', summary.by_compatibility.dotnet.no) }}
+            {{ compat_cell('dotnet', 'unknown', summary.by_compatibility.dotnet.unknown) }}
+            {{ compat_cell('dotnet', 'na', summary.by_compatibility.dotnet.na) }}
+          </tr>
+          <tr>
+            <td>Go</td>
+            {{ compat_cell('go', 'yes', summary.by_compatibility.go.yes) }}
+            {{ compat_cell('go', 'no', summary.by_compatibility.go.no) }}
+            {{ compat_cell('go', 'needs_review', summary.by_compatibility.go.needs_review) }}
+            {{ compat_cell('go', 'none', summary.by_compatibility.go.none) }}
+          </tr>
         </tbody>
       </table>
 
@@ -367,6 +407,39 @@ $(document).ready(function() {
     e.stopPropagation();
     var name = $(this).closest('.tag').data('filter-name');
     clearFilter(name);
+  });
+
+  // ============================================================
+  // Runtime drill-down — clickable cells in "By runtime" table
+  // ============================================================
+  var RUNTIME_COLS = { java: 2, node: 3, dotnet: 4, go: 5 };
+  var RUNTIME_LABELS = { java: 'Java', node: 'Node.js', dotnet: '.NET', go: 'Go' };
+  var STATE_REGEX = {
+    yes: '^Yes',
+    no: '^No',
+    unknown: '^Unknown',
+    needs_review: '^Needs Review',
+    na: '^N/A',
+    none: '^None',
+  };
+  var STATE_LABELS = {
+    yes: 'Yes',
+    no: 'No',
+    unknown: 'Unknown',
+    needs_review: 'Needs review',
+    na: 'N/A',
+    none: 'None',
+  };
+
+  $('.compat-cell').on('click', function() {
+    if ($(this).hasClass('empty')) return;
+    var runtime = $(this).data('runtime');
+    var state = $(this).data('state');
+    var col = RUNTIME_COLS[runtime];
+    var regex = STATE_REGEX[state];
+    if (col === undefined || regex === undefined) return;
+    var label = RUNTIME_LABELS[runtime] + ': ' + STATE_LABELS[state];
+    window.reportFilters.set(runtime, label, col, regex);
   });
 
   // ============================================================

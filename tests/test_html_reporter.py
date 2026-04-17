@@ -268,6 +268,31 @@ def test_render_html_status_cards_are_clickable():
     assert 'data-filter-clear="true"' in html
 
 
+# ---------------------------------------------------------------------------
+# Runtime drill-down HTML marker tests
+# ---------------------------------------------------------------------------
+
+
+def test_render_html_has_clickable_compat_cells():
+    html = _render_fixture_html()
+    for runtime in ("java", "node", "dotnet", "go"):
+        assert 'data-runtime="' + runtime + '"' in html
+    assert 'data-runtime="java" data-state="no"' in html
+    assert 'data-runtime="go" data-state="needs_review"' in html
+
+
+def test_render_html_compat_cell_empty_class_when_zero():
+    html = _render_fixture_html()
+    assert "compat-cell empty" in html
+
+
+def test_render_html_runtime_filter_js_present():
+    html = _render_fixture_html()
+    assert "reportFilters.set(" in html
+    assert "RUNTIME_COLS" in html
+    assert "STATE_REGEX" in html
+
+
 def test_generate_html_report_writes_file(tmp_path: Path):
     out = tmp_path / "report.html"
     generate_html_report(
