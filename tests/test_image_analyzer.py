@@ -809,12 +809,8 @@ class TestNodeSiblingLookup:
         )
 
     def test_alpine_suffix_propagates_from_glibc_sibling(self, analyzer):
-        unknown = self._make(
-            "/home/runner/externals/node20_alpine/bin/node", "unknown", None
-        )
-        glibc = self._make(
-            "/home/runner/externals/node20/bin/node", "20.19.5", True
-        )
+        unknown = self._make("/home/runner/externals/node20_alpine/bin/node", "unknown", None)
+        glibc = self._make("/home/runner/externals/node20/bin/node", "20.19.5", True)
         result = analyzer._infer_node_version_from_sibling(unknown, [unknown, glibc])
         assert result == ("20.19.5", True)
 
@@ -825,23 +821,15 @@ class TestNodeSiblingLookup:
         assert result == ("24.10.0", True)
 
     def test_no_sibling_returns_none(self, analyzer):
-        unknown = self._make(
-            "/home/runner/externals/node20_alpine/bin/node", "unknown", None
-        )
+        unknown = self._make("/home/runner/externals/node20_alpine/bin/node", "unknown", None)
         unrelated = self._make("/usr/local/bin/node", "18.19.0", False)
         result = analyzer._infer_node_version_from_sibling(unknown, [unknown, unrelated])
         assert result is None
 
     def test_sibling_with_unknown_version_is_skipped(self, analyzer):
-        unknown = self._make(
-            "/home/runner/externals/node20_alpine/bin/node", "unknown", None
-        )
-        also_unknown = self._make(
-            "/home/runner/externals/node20/bin/node", "unknown", None
-        )
-        result = analyzer._infer_node_version_from_sibling(
-            unknown, [unknown, also_unknown]
-        )
+        unknown = self._make("/home/runner/externals/node20_alpine/bin/node", "unknown", None)
+        also_unknown = self._make("/home/runner/externals/node20/bin/node", "unknown", None)
+        result = analyzer._infer_node_version_from_sibling(unknown, [unknown, also_unknown])
         assert result is None
 
     def test_no_libc_variant_suffix_returns_none(self, analyzer):
@@ -851,12 +839,8 @@ class TestNodeSiblingLookup:
         assert result is None
 
     def test_incompatible_sibling_propagates_incompatibility(self, analyzer):
-        unknown = self._make(
-            "/home/runner/externals/node18_alpine/bin/node", "unknown", None
-        )
-        glibc = self._make(
-            "/home/runner/externals/node18/bin/node", "18.19.0", False
-        )
+        unknown = self._make("/home/runner/externals/node18_alpine/bin/node", "unknown", None)
+        glibc = self._make("/home/runner/externals/node18/bin/node", "18.19.0", False)
         result = analyzer._infer_node_version_from_sibling(unknown, [unknown, glibc])
         assert result == ("18.19.0", False)
 
@@ -871,12 +855,7 @@ class TestNodeSiblingLookup:
     def test_libc_mismatch_marker_absent(self, analyzer):
         assert analyzer._looks_like_libc_mismatch("Command timed out") is False
         assert analyzer._looks_like_libc_mismatch("") is False
-        assert (
-            analyzer._looks_like_libc_mismatch(
-                "some unrelated error: No such file or directory"
-            )
-            is False
-        )
+        assert analyzer._looks_like_libc_mismatch("some unrelated error: No such file or directory") is False
 
     def test_does_not_match_bare_suffix_component(self, analyzer):
         unknown = self._make("/_alpine/bin/node", "unknown", None)

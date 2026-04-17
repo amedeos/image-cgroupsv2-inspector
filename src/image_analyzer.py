@@ -280,9 +280,7 @@ class ImageAnalyzer:
     # output. When a musl (Alpine) binary is run inside a glibc image (or
     # vice versa), the OCI runtime reports something like:
     #   exec container process (missing dynamic library?) `...`: No such file or directory
-    LIBC_MISMATCH_MARKERS = (
-        "missing dynamic library",
-    )
+    LIBC_MISMATCH_MARKERS = ("missing dynamic library",)
 
     # Directory-name suffixes that identify a libc variant of a node
     # installation (typically used by the GitHub Actions Runner and similar
@@ -1357,8 +1355,7 @@ class ImageAnalyzer:
                 )
                 if debug:
                     print(
-                        f"      [DEBUG] Node.js: inferred {inferred_version} from sibling "
-                        f"for {b.path} (libc variant)"
+                        f"      [DEBUG] Node.js: inferred {inferred_version} from sibling for {b.path} (libc variant)"
                     )
                 b.version = inferred_version
                 b.is_compatible = inferred_compat
