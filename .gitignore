@@ -79,3 +79,6 @@ Thumbs.db
 
 # rootfs directories (created by the tool)
 rootfs/
+
+# Local prompt files (not tracked)
+prompts/
