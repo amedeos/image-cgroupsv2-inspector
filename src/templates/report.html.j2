@@ -17,10 +17,6 @@ dl.meta dd { margin: 0; }
 .card { padding: 14px 20px; border-radius: 8px; background: #f4f4f4; min-width: 100px; text-align: center; }
 .card .num { display: block; font-size: 28px; font-weight: bold; }
 .card .label { display: block; font-size: 12px; text-transform: uppercase; color: #666; }
-.card.ok { background: #d4edda; }
-.card.ko { background: #f8d7da; }
-.card.warn { background: #fff3cd; }
-.card.na { background: #e2e3e5; }
 .status-not_applicable { color: #666; }
 .compat-summary { border-collapse: collapse; margin: 10px 0; }
 .compat-summary th, .compat-summary td { padding: 6px 12px; border: 1px solid #ddd; text-align: right; }
@@ -34,6 +30,46 @@ td.used-by-cell:hover { background: #f0f0f0; }
 .consumers-table th, .consumers-table td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; }
 .consumers-table th { background: #f8f8f8; }
 section { margin: 30px 0; }
+
+/* --- Summary interactive layout --- */
+.summary-grid { display: grid; grid-template-columns: 1fr auto; gap: 30px; align-items: start; margin-top: 20px; }
+@media (max-width: 900px) { .summary-grid { grid-template-columns: 1fr; } }
+.summary-chart { text-align: center; min-width: 220px; }
+.summary-chart svg { max-width: 240px; height: auto; display: block; margin: 0 auto; }
+.chart-empty { color: #666; font-style: italic; }
+
+/* --- Pie chart slices --- */
+.pie-slice { cursor: pointer; transition: opacity 0.15s; }
+.pie-slice:hover { opacity: 0.85; }
+.pie-slice:focus { outline: 2px solid #333; outline-offset: 2px; }
+
+/* --- Legend --- */
+.chart-legend { list-style: none; padding: 0; margin: 14px 0 0 0; font-size: 13px; text-align: left; }
+.chart-legend li { display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 2px 6px; border-radius: 3px; cursor: pointer; }
+.chart-legend li:hover { background: #f0f0f0; }
+.chart-legend li:focus { outline: 2px solid #333; }
+.chart-legend .swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.chart-legend .legend-count { color: #666; margin-left: auto; }
+
+/* --- Interactive cards --- */
+.card { cursor: pointer; user-select: none; transition: box-shadow 0.15s; }
+.card:hover { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15); }
+.card:focus { outline: 2px solid #333; outline-offset: 2px; }
+.card.empty { cursor: default; opacity: 0.55; }
+.card.empty:hover { box-shadow: none; }
+.card.total-card { background: #ffffff; border: 2px solid #ccc; }
+.card.status-compatible { background: #d4edda; }
+.card.status-incompatible { background: #f8d7da; }
+.card.status-needs_review { background: #fff3cd; }
+.card.status-not_applicable { background: #e2e3e5; }
+
+/* --- Filter banner --- */
+#filter-banner { background: #e7f3ff; border: 1px solid #b3d7ff; padding: 10px 14px; border-radius: 6px; margin: 15px 0 10px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#filter-banner .tag { background: #0366d6; color: white; padding: 3px 10px; border-radius: 3px; font-size: 12px; font-family: monospace; }
+#filter-banner .tag .remove { margin-left: 6px; cursor: pointer; opacity: 0.8; }
+#filter-banner .tag .remove:hover { opacity: 1; }
+#filter-banner #clear-filters { margin-left: auto; background: transparent; border: 1px solid #0366d6; color: #0366d6; padding: 4px 12px; border-radius: 3px; cursor: pointer; font-size: 13px; }
+#filter-banner #clear-filters:hover { background: #0366d6; color: white; }
 </style>
 </head>
 <body>
@@ -51,35 +87,82 @@ section { margin: 30px 0; }
 
 <section id="summary">
   <h2>Summary</h2>
-  <div class="cards">
-    <div class="card"><span class="num">{{ summary.total_images }}</span><span class="label">Images</span></div>
-    <div class="card ok"><span class="num">{{ summary.by_overall_status.compatible }}</span><span class="label">Compatible</span></div>
-    <div class="card ko"><span class="num">{{ summary.by_overall_status.incompatible }}</span><span class="label">Incompatible</span></div>
-    <div class="card warn"><span class="num">{{ summary.by_overall_status.needs_review }}</span><span class="label">Needs review</span></div>
-    <div class="card na"><span class="num">{{ summary.by_overall_status.not_applicable }}</span><span class="label">N/A</span></div>
+  <div class="summary-grid">
+    <div class="summary-main">
+      <div class="cards">
+        <div class="card total-card" data-filter-clear="true" tabindex="0" role="button" aria-label="Show all images, clear filters">
+          <span class="num">{{ summary.total_images }}</span>
+          <span class="label">All images</span>
+        </div>
+        {% for status, count in summary.by_overall_status.items() %}
+        <div class="card status-card status-{{ status }}{% if count == 0 %} empty{% endif %}"
+             data-filter-status="{{ status }}"
+             {% if count > 0 %}tabindex="0" role="button"{% endif %}
+             aria-label="Filter to {{ status|replace('_', ' ') }} images">
+          <span class="num">{{ count }}</span>
+          <span class="label">{{ status|replace('_', ' ')|title }}</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      <h3>By runtime</h3>
+      <table class="compat-summary">
+        <thead><tr><th>Runtime</th><th>Yes</th><th>No</th><th>Unknown / Needs review</th><th>N/A</th></tr></thead>
+        <tbody>
+          <tr><td>Java</td><td>{{ summary.by_compatibility.java.yes }}</td><td>{{ summary.by_compatibility.java.no }}</td><td>{{ summary.by_compatibility.java.unknown }}</td><td>{{ summary.by_compatibility.java.na }}</td></tr>
+          <tr><td>Node.js</td><td>{{ summary.by_compatibility.node.yes }}</td><td>{{ summary.by_compatibility.node.no }}</td><td>{{ summary.by_compatibility.node.unknown }}</td><td>{{ summary.by_compatibility.node.na }}</td></tr>
+          <tr><td>.NET</td><td>{{ summary.by_compatibility.dotnet.yes }}</td><td>{{ summary.by_compatibility.dotnet.no }}</td><td>{{ summary.by_compatibility.dotnet.unknown }}</td><td>{{ summary.by_compatibility.dotnet.na }}</td></tr>
+          <tr><td>Go</td><td>{{ summary.by_compatibility.go.yes }}</td><td>{{ summary.by_compatibility.go.no }}</td><td>{{ summary.by_compatibility.go.needs_review }}</td><td>{{ summary.by_compatibility.go.none }}</td></tr>
+        </tbody>
+      </table>
+
+      {% if summary.deep_scan.enabled %}
+      <h3>Deep scan</h3>
+      <ul>
+        <li>Matches: {{ summary.deep_scan.matches }}</li>
+        <li>v1-only (likely incompatible): {{ summary.deep_scan.v1_only }}</li>
+        <li>v2-aware (likely safe): {{ summary.deep_scan.v2_aware }}</li>
+        <li>By confidence: high={{ summary.deep_scan.by_confidence.high }}, medium={{ summary.deep_scan.by_confidence.medium }}, low={{ summary.deep_scan.by_confidence.low }}</li>
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="summary-chart">
+      {% if summary.pie_chart_slices %}
+      <svg viewBox="0 0 200 200" role="img" aria-label="Overall status distribution">
+        {% for slice in summary.pie_chart_slices %}
+        <path d="{{ slice.path }}"
+              fill="{{ slice.color }}"
+              class="pie-slice"
+              data-filter-status="{{ slice.status }}"
+              tabindex="0"
+              role="button"
+              aria-label="Filter to {{ slice.status|replace('_', ' ') }}, {{ slice.percentage }}%">
+          <title>{{ slice.status|replace('_', ' ')|title }}: {{ slice.count }} ({{ slice.percentage }}%)</title>
+        </path>
+        {% endfor %}
+      </svg>
+      <ul class="chart-legend">
+        {% for slice in summary.pie_chart_slices %}
+        <li data-filter-status="{{ slice.status }}" tabindex="0" role="button">
+          <span class="swatch" style="background: {{ slice.color }}"></span>
+          <span class="legend-label">{{ slice.status|replace('_', ' ')|title }}</span>
+          <span class="legend-count">{{ slice.count }} ({{ slice.percentage }}%)</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="chart-empty">No images to chart.</p>
+      {% endif %}
+    </div>
   </div>
-
-  <h3>By runtime</h3>
-  <table class="compat-summary">
-    <thead><tr><th>Runtime</th><th>Yes</th><th>No</th><th>Unknown / Needs review</th><th>N/A</th></tr></thead>
-    <tbody>
-      <tr><td>Java</td><td>{{ summary.by_compatibility.java.yes }}</td><td>{{ summary.by_compatibility.java.no }}</td><td>{{ summary.by_compatibility.java.unknown }}</td><td>{{ summary.by_compatibility.java.na }}</td></tr>
-      <tr><td>Node.js</td><td>{{ summary.by_compatibility.node.yes }}</td><td>{{ summary.by_compatibility.node.no }}</td><td>{{ summary.by_compatibility.node.unknown }}</td><td>{{ summary.by_compatibility.node.na }}</td></tr>
-      <tr><td>.NET</td><td>{{ summary.by_compatibility.dotnet.yes }}</td><td>{{ summary.by_compatibility.dotnet.no }}</td><td>{{ summary.by_compatibility.dotnet.unknown }}</td><td>{{ summary.by_compatibility.dotnet.na }}</td></tr>
-      <tr><td>Go</td><td>{{ summary.by_compatibility.go.yes }}</td><td>{{ summary.by_compatibility.go.no }}</td><td>{{ summary.by_compatibility.go.needs_review }}</td><td>{{ summary.by_compatibility.go.none }}</td></tr>
-    </tbody>
-  </table>
-
-  {% if summary.deep_scan.enabled %}
-  <h3>Deep scan</h3>
-  <ul>
-    <li>Matches: {{ summary.deep_scan.matches }}</li>
-    <li>v1-only (likely incompatible): {{ summary.deep_scan.v1_only }}</li>
-    <li>v2-aware (likely safe): {{ summary.deep_scan.v2_aware }}</li>
-    <li>By confidence: high={{ summary.deep_scan.by_confidence.high }}, medium={{ summary.deep_scan.by_confidence.medium }}, low={{ summary.deep_scan.by_confidence.low }}</li>
-  </ul>
-  {% endif %}
 </section>
+
+<div id="filter-banner" style="display: none;" role="status" aria-live="polite">
+  <strong>Filter:</strong>
+  <span id="filter-tags"></span>
+  <button id="clear-filters" type="button">Clear all</button>
+</div>
 
 <section id="images">
   <h2>Images ({{ images|length }})</h2>
@@ -147,6 +230,66 @@ section { margin: 30px 0; }
 </script>
 <script>
 $(document).ready(function() {
+
+  // ============================================================
+  // Shared filter infrastructure — extended in prompt 08
+  // ============================================================
+
+  var STATUS_COL = 7;
+
+  var activeFilters = {};
+  var imagesTable = null;
+
+  function setFilter(name, label, columnIndex, regex) {
+    activeFilters[name] = { label: label, columnIndex: columnIndex, regex: regex };
+    imagesTable.column(columnIndex).search(regex, true, false).draw();
+    renderBanner();
+  }
+
+  function clearFilter(name) {
+    if (!activeFilters[name]) return;
+    var col = activeFilters[name].columnIndex;
+    delete activeFilters[name];
+    imagesTable.column(col).search('').draw();
+    renderBanner();
+  }
+
+  function clearAllFilters() {
+    Object.keys(activeFilters).forEach(function(n) {
+      imagesTable.column(activeFilters[n].columnIndex).search('');
+    });
+    activeFilters = {};
+    imagesTable.draw();
+    renderBanner();
+  }
+
+  function renderBanner() {
+    var names = Object.keys(activeFilters);
+    var banner = $('#filter-banner');
+    if (names.length === 0) {
+      banner.hide();
+      return;
+    }
+    var tagsHtml = names.map(function(n) {
+      var f = activeFilters[n];
+      return '<span class="tag" data-filter-name="' + n + '">' +
+        f.label +
+        ' <span class="remove" title="Remove this filter">\u00d7</span>' +
+        '</span>';
+    }).join(' ');
+    $('#filter-tags').html(tagsHtml);
+    banner.show();
+  }
+
+  window.reportFilters = {
+    set: setFilter,
+    clear: clearFilter,
+    clearAll: clearAllFilters,
+  };
+
+  // ============================================================
+  // Consumers child-row helper
+  // ============================================================
   function formatConsumers(consumersJson) {
     var consumers = JSON.parse(consumersJson);
     if (!consumers.length) return '<em>No consumer details.</em>';
@@ -169,14 +312,17 @@ $(document).ready(function() {
     return html;
   }
 
-  var table = $('#images-table').DataTable({
+  // ============================================================
+  // DataTables init
+  // ============================================================
+  imagesTable = $('#images-table').DataTable({
     pageLength: 25,
     order: [[7, 'asc']]
   });
 
   $('#images-table tbody').on('click', 'td.used-by-cell', function() {
     var tr = $(this).closest('tr');
-    var row = table.row(tr);
+    var row = imagesTable.row(tr);
     if (row.child.isShown()) {
       row.child.hide();
       tr.removeClass('shown');
@@ -190,6 +336,49 @@ $(document).ready(function() {
   if ($('#errors-table').length) {
     $('#errors-table').DataTable({ pageLength: 10 });
   }
+
+  // ============================================================
+  // Status card clicks
+  // ============================================================
+  $('.card.status-card').on('click', function() {
+    if ($(this).hasClass('empty')) return;
+    var status = $(this).data('filter-status');
+    setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
+  });
+
+  $('.card.total-card').on('click', clearAllFilters);
+
+  // ============================================================
+  // Pie chart slice and legend clicks
+  // ============================================================
+  function handleStatusShortcut(e) {
+    var status = $(this).data('filter-status');
+    if (!status) return;
+    setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
+  }
+  $('.pie-slice').on('click', handleStatusShortcut);
+  $('.chart-legend li').on('click', handleStatusShortcut);
+
+  // ============================================================
+  // Banner interactions
+  // ============================================================
+  $('#clear-filters').on('click', clearAllFilters);
+  $('#filter-tags').on('click', '.tag .remove', function(e) {
+    e.stopPropagation();
+    var name = $(this).closest('.tag').data('filter-name');
+    clearFilter(name);
+  });
+
+  // ============================================================
+  // Keyboard accessibility
+  // ============================================================
+  $('body').on('keydown', '[role="button"]', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      $(this).trigger('click');
+    }
+  });
+
 });
 </script>
 </body>

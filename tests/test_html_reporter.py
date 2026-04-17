@@ -150,7 +150,6 @@ def test_render_html_contains_key_markers():
     assert "dataTables_wrapper" in html
     assert "jQuery" in html
     assert "status-not_applicable" in html
-    assert '<div class="card na">' in html
 
 
 def test_render_html_empty_csv(tmp_path: Path):
@@ -179,6 +178,94 @@ def test_build_context_not_applicable_for_runtimeless_image():
     assert nginx["dotnet"]["compatible"] == "N/A"
     assert nginx["go"]["compatible"] == "N/A"
     assert nginx["deep_scan"]["match"] is False
+
+
+def _render_fixture_html():
+    ctx = build_report_context(
+        csv_path=FIXTURE_CSV,
+        tool_version="2.0.0",
+        target="sample-target",
+        generated_at=FIXED_TS,
+    )
+    return render_html_report(ctx)
+
+
+# ---------------------------------------------------------------------------
+# Pie chart context tests
+# ---------------------------------------------------------------------------
+
+
+def test_pie_chart_slices_present_and_nonzero_only():
+    ctx = _ctx()
+    slices = ctx["summary"]["pie_chart_slices"]
+    assert len(slices) == 4
+    for s in slices:
+        assert s["count"] > 0
+        assert 0 < s["percentage"] <= 100
+        assert s["path"].startswith("M 100,100 L ") or "A 80,80" in s["path"]
+        assert s["color"].startswith("#")
+        assert set(s.keys()) == {"status", "count", "percentage", "path", "color"}
+
+
+def test_pie_chart_percentages_sum_to_100():
+    ctx = _ctx()
+    slices = ctx["summary"]["pie_chart_slices"]
+    assert abs(sum(s["percentage"] for s in slices) - 100.0) < 0.05
+
+
+def test_pie_chart_helper_single_slice_full_circle():
+    from src.html_reporter import _build_pie_chart_slices
+
+    slices = _build_pie_chart_slices({"compatible": 5, "incompatible": 0, "needs_review": 0, "not_applicable": 0})
+    assert len(slices) == 1
+    assert slices[0]["percentage"] == 100.0
+    assert "A 80,80" in slices[0]["path"]
+    assert slices[0]["path"].count("A 80,80") == 2
+
+
+def test_pie_chart_helper_empty():
+    from src.html_reporter import _build_pie_chart_slices
+
+    assert _build_pie_chart_slices({}) == []
+    assert _build_pie_chart_slices({"compatible": 0, "incompatible": 0}) == []
+
+
+def test_pie_chart_helper_unknown_status_gets_fallback_color():
+    from src.html_reporter import _DEFAULT_STATUS_COLOR, _build_pie_chart_slices
+
+    slices = _build_pie_chart_slices({"future_status": 1, "compatible": 1})
+    colors = {s["status"]: s["color"] for s in slices}
+    assert colors["future_status"] == _DEFAULT_STATUS_COLOR
+    assert colors["compatible"] == "#28a745"
+
+
+# ---------------------------------------------------------------------------
+# HTML marker tests for interactive features
+# ---------------------------------------------------------------------------
+
+
+def test_render_html_has_pie_chart():
+    html = _render_fixture_html()
+    assert '<svg viewBox="0 0 200 200"' in html
+    assert 'class="pie-slice"' in html
+    assert "chart-legend" in html
+    for status in ("compatible", "incompatible", "needs_review", "not_applicable"):
+        assert 'data-filter-status="' + status + '"' in html
+
+
+def test_render_html_has_filter_banner():
+    html = _render_fixture_html()
+    assert 'id="filter-banner"' in html
+    assert 'id="clear-filters"' in html
+    assert 'style="display: none;"' in html
+
+
+def test_render_html_status_cards_are_clickable():
+    html = _render_fixture_html()
+    for status in ("compatible", "incompatible", "needs_review", "not_applicable"):
+        assert 'data-filter-status="' + status + '"' in html
+    assert "total-card" in html
+    assert 'data-filter-clear="true"' in html
 
 
 def test_generate_html_report_writes_file(tmp_path: Path):

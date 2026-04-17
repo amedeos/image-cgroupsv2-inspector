@@ -591,6 +591,36 @@
       "v1_only": 1,
       "v2_aware": 1
     },
+    "pie_chart_slices": [
+      {
+        "color": "#28a745",
+        "count": 5,
+        "path": "M 100,100 L 100.000,20.000 A 80,80 0 0,1 122.539,176.759 Z",
+        "percentage": 45.45,
+        "status": "compatible"
+      },
+      {
+        "color": "#dc3545",
+        "count": 3,
+        "path": "M 100,100 L 122.539,176.759 A 80,80 0 0,1 20.814,111.385 Z",
+        "percentage": 27.27,
+        "status": "incompatible"
+      },
+      {
+        "color": "#ffc107",
+        "count": 2,
+        "path": "M 100,100 L 20.814,111.385 A 80,80 0 0,1 56.749,32.700 Z",
+        "percentage": 18.18,
+        "status": "needs_review"
+      },
+      {
+        "color": "#6c757d",
+        "count": 1,
+        "path": "M 100,100 L 56.749,32.700 A 80,80 0 0,1 100.000,20.000 Z",
+        "percentage": 9.09,
+        "status": "not_applicable"
+      }
+    ],
     "total_images": 11,
     "total_rows": 14,
     "with_errors": 1

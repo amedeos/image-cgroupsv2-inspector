@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,92 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 CSV_TIMESTAMP_SUFFIX_RE = re.compile(r"-\d{8}-\d{6}$")
 
 _RUNTIMES = ("java", "node", "dotnet", "go")
+
+# Colors for pie chart slices and status-based UI styling. Keys should match
+# the values produced by the overall_status classifier. If a new status is
+# introduced in the future, add it here; if missing, _DEFAULT_STATUS_COLOR
+# is used as a neutral fallback so the chart still renders.
+STATUS_COLORS = {
+    "compatible": "#28a745",
+    "incompatible": "#dc3545",
+    "needs_review": "#ffc107",
+    "not_applicable": "#6c757d",
+}
+_DEFAULT_STATUS_COLOR = "#adb5bd"
+
+
+def _build_pie_chart_slices(by_status: dict[str, int]) -> list[dict]:
+    """Compute inline-SVG slice data for the overall-status pie chart.
+
+    Args:
+        by_status: mapping of status name to image count (any subset of
+            STATUS_COLORS keys, plus potentially future unknown keys).
+
+    Returns:
+        List of slice dicts, one per non-zero bucket, ordered as the input
+        dict iterates. Zero-count buckets are omitted. Returns [] when
+        total is zero.
+
+    Each slice dict has:
+        status:      str — bucket name
+        count:       int — raw count
+        percentage:  float — rounded to 2 decimals
+        path:        str — SVG path string drawing the slice against a
+                     circle centered at (100, 100) with radius 80
+        color:       str — hex color from STATUS_COLORS (or default)
+
+    Special cases:
+        - Single non-zero slice: path is a full circle (two 180° arcs)
+          since a degenerate 0-length arc is not valid SVG.
+    """
+    total = sum(by_status.values())
+    if total == 0:
+        return []
+
+    cx, cy, r = 100, 100, 80
+    nonzero = [(status, count) for status, count in by_status.items() if count > 0]
+
+    if len(nonzero) == 1:
+        status, count = nonzero[0]
+        path = f"M {cx},{cy - r} A {r},{r} 0 1,1 {cx},{cy + r} A {r},{r} 0 1,1 {cx},{cy - r} Z"
+        return [
+            {
+                "status": status,
+                "count": count,
+                "percentage": 100.0,
+                "path": path,
+                "color": STATUS_COLORS.get(status, _DEFAULT_STATUS_COLOR),
+            }
+        ]
+
+    slices = []
+    start_angle = -math.pi / 2
+
+    for status, count in nonzero:
+        fraction = count / total
+        angle = 2 * math.pi * fraction
+        end_angle = start_angle + angle
+
+        x1 = cx + r * math.cos(start_angle)
+        y1 = cy + r * math.sin(start_angle)
+        x2 = cx + r * math.cos(end_angle)
+        y2 = cy + r * math.sin(end_angle)
+
+        large_arc = 1 if angle > math.pi else 0
+        path = f"M {cx},{cy} L {x1:.3f},{y1:.3f} A {r},{r} 0 {large_arc},1 {x2:.3f},{y2:.3f} Z"
+
+        slices.append(
+            {
+                "status": status,
+                "count": count,
+                "percentage": round(100 * count / total, 2),
+                "path": path,
+                "color": STATUS_COLORS.get(status, _DEFAULT_STATUS_COLOR),
+            }
+        )
+        start_angle = end_angle
+
+    return slices
 
 
 def _derive_target(csv_path: Path) -> str:
@@ -206,6 +293,22 @@ def build_report_context(
     unique_image_names = {img["image_name"] for img in images}
     total_error_rows = sum(len(g) for g in error_rows.values())
 
+    summary = {
+        "total_images": len(unique_image_names),
+        "total_rows": len(rows),
+        "with_errors": total_error_rows,
+        "by_overall_status": by_overall,
+        "by_compatibility": by_compat,
+        "deep_scan": {
+            "enabled": ds_enabled,
+            "matches": len(ds_matches),
+            "v1_only": ds_v1_only,
+            "v2_aware": ds_v2_aware,
+            "by_confidence": ds_by_conf,
+        },
+    }
+    summary["pie_chart_slices"] = _build_pie_chart_slices(summary["by_overall_status"])
+
     return {
         "metadata": {
             "target": target,
@@ -214,20 +317,7 @@ def build_report_context(
             "csv_filename": csv_path.name,
             "source_mode": _compute_source_mode(sources),
         },
-        "summary": {
-            "total_images": len(unique_image_names),
-            "total_rows": len(rows),
-            "with_errors": total_error_rows,
-            "by_overall_status": by_overall,
-            "by_compatibility": by_compat,
-            "deep_scan": {
-                "enabled": ds_enabled,
-                "matches": len(ds_matches),
-                "v1_only": ds_v1_only,
-                "v2_aware": ds_v2_aware,
-                "by_confidence": ds_by_conf,
-            },
-        },
+        "summary": summary,
         "images": images,
         "errors": errors,
     }
