@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [2.5.0] — Unreleased
 
+### Added
+- **HTML report** alongside the CSV output (#62): new `--html-report`
+  flag generates a self-contained HTML report (DataTables + Jinja2,
+  assets bundled for air-gapped environments) under
+  `<output-dir>/html/<basename>.html`. New `--report-only <CSV>` flag
+  regenerates the HTML offline from an existing CSV without re-scanning.
+  Includes interactive pie chart, clickable status cards, per-runtime
+  drill-down filters, and a removable filter banner. Adds
+  `not_applicable` overall-status to replace the misleading `unknown`
+  fallthrough for images with no detected runtime.
+- **Deterministic Go binary cgroups v2 scanning** (#60): replaces the
+  heuristic `strings`+`grep` approach with precise `go version` /
+  `go version -m` analysis. Go ≥ 1.19 is natively compatible; older
+  versions are checked against a v2-aware module matrix
+  (`automaxprocs`, `automemlimit`, …). New `--disable-go` CLI flag and
+  four new CSV columns (`go_binary`, `go_version`,
+  `go_cgroup_v2_compatible`, `go_modules`); the deprecated
+  `deep_scan_go_cgroup_libs` column is removed.
+- **Node.js sibling-lookup fallback** for musl/Alpine binaries (#61):
+  when a `nodeXX_alpine` / `nodeXX_musl` binary fails to execute due to
+  a libc / dynamic-linker mismatch (e.g. GitHub Actions Runner images
+  shipping both glibc and musl builds side-by-side), the version is now
+  inferred from the paired glibc sibling at the same installation path,
+  turning previously "Unknown" rows into deterministic Yes/No verdicts.
+- Quay infrastructure for Go cgroups v2 compliance test images (#59):
+  seven new deep-scan fixture images under
+  `manifests/quay/deep-scan-images/go-v2-*/` covering compliant,
+  needs-review, and unaware runtime/library combinations.
+- `tests/test_version.py` smoke tests guarding against future drift
+  between `src/__init__.py:__version__`, `pyproject.toml`, and the main
+  script's import.
+
 ### Changed
 - Align in-repo version to actual release tags and introduce a single
   source of truth (`src/__init__.py:__version__`); `pyproject.toml` and
@@ -12,11 +44,6 @@ All notable changes to this project will be documented in this file.
   literal that was never released.
 - Backfill `CHANGELOG.md` entries for `[2.1.0]` through `[2.4.0]` from
   git history (these releases shipped without changelog updates).
-
-### Added
-- `tests/test_version.py` smoke tests guarding against future drift
-  between `src/__init__.py:__version__`, `pyproject.toml`, and the main
-  script's import.
 
 ## [2.4.0] — 2026-04-14
 
