@@ -106,11 +106,13 @@ class TestParseArguments:
             args = parse_arguments()
         assert args.latest_only == 5
 
-    def test_version_is_2(self, capsys):
+    def test_version_is_current(self, capsys):
+        from src import __version__
+
         with patch("sys.argv", ["image-cgroupsv2-inspector", "--version"]), pytest.raises(SystemExit):
             parse_arguments()
         captured = capsys.readouterr()
-        assert "2.0.0" in captured.out
+        assert __version__ in captured.out
 
     def test_openshift_args_still_work(self):
         with patch(

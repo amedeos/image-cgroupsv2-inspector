@@ -1046,7 +1046,7 @@ The setup script is idempotent and includes retry logic (3 attempts) for push op
 
 ```
 image-cgroupsv2-inspector/
-├── image-cgroupsv2-inspector   # Main executable (Python 3.12) — v2.0.0
+├── image-cgroupsv2-inspector   # Main executable (Python 3.12)
 ├── requirements.txt
 ├── pyproject.toml              # ruff + pytest config
 ├── Containerfile
