@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] — Unreleased
+
+### Changed
+- Align in-repo version to actual release tags and introduce a single
+  source of truth (`src/__init__.py:__version__`); `pyproject.toml` and
+  the main script now read from it. `--version` and the ASCII banner
+  now report the real release version instead of the stale `2.0.0`
+  literal that was never released.
+- Backfill `CHANGELOG.md` entries for `[2.1.0]` through `[2.4.0]` from
+  git history (these releases shipped without changelog updates).
+
+### Added
+- `tests/test_version.py` smoke tests guarding against future drift
+  between `src/__init__.py:__version__`, `pyproject.toml`, and the main
+  script's import.
+
 ## [2.4.0] — 2026-04-14
 
 ### Added

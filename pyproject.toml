@@ -1,7 +1,7 @@
 [project]
 name = "image-cgroupsv2-inspector"
 # Keep in sync with src/__init__.py:__version__
-version = "2.4.0"
+version = "2.5.0"
 requires-python = ">=3.12"
 
 [tool.ruff]
