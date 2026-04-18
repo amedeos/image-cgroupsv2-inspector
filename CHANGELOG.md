@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- CI `test` job now actually runs `pytest`. The job installed
+  `pytest`/`pytest-cov` and uploaded `coverage.xml` but never invoked
+  the test runner, so the suite had been silently skipped in CI. The
+  new `Run tests` step executes `pytest tests/ -v --cov=src
+  --cov-report=xml --cov-report=term` and produces the coverage report
+  referenced by the existing upload step.
+
 ## [2.5.0] — 2026-05-18
 
 ### Added
