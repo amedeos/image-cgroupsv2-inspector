@@ -2,7 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.0.0] — Unreleased
+## [2.4.0] — 2026-04-14
+
+### Added
+- Detect Go cgroup library imports in binary deep-scan (#56)
+- Follow `exec` chains from entrypoint scripts to ELF binaries for deep-scan
+- Pre-flight check for `strings` binary when `--deep-scan` is enabled (#54)
+
+### Changed
+- Propagate verbose debug logging to log file (#57)
+
+## [2.3.0] — 2026-04-13
+
+### Added
+- Deep-scan heuristic mode for cgroup v1 references in entrypoint scripts and binaries (#51)
+
+### Changed
+- Move `analysis_error` to last CSV column (#53)
+
+## [2.2.0] — 2026-04-11
+
+### Added
+- `--resume` flag to allow restarting interrupted scans (#43, #45)
+- `--image-timeout` flag for per-image pull+scan deadline (#42, #44)
+
+## [2.1.0] — 2026-04-10
+
+### Changed
+- Handle unknown runtime versions: return "Unknown" compatibility instead of "No" (#40)
+- Exclude `node_modules` from binary scan and add "Unknown" count to summary recap (#41)
+
+## [2.0.0] — 2026-04-03
 
 ### Added
 - **Quay registry scan mode**: scan container images directly from a
@@ -38,7 +68,6 @@ All notable changes to this project will be documented in this file.
   `AnalysisOrchestrator` (shared by both modes)
 - CSV output now includes 3 additional columns (`source`,
   `registry_org`, `registry_repo`) — backward compatible
-- Version bumped to 2.0.0
 - GitHub Actions CI updated to run on feature branches
 - OpenShift test manifests moved from `test/` to `manifests/cluster/`
 - Docker/container support added (Containerfile by @beelzetron)

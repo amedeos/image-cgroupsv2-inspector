@@ -28,6 +28,7 @@ from pathlib import Path
 script_dir = Path(__file__).parent.resolve()
 sys.path.insert(0, str(script_dir))
 
+from src import __version__ as TOOL_VERSION
 from src.analysis_orchestrator import AnalysisOrchestrator
 from src.auth_utils import generate_registry_auth_json
 from src.html_reporter import generate_html_report
@@ -38,8 +39,6 @@ from src.registry_collector import RegistryCollector
 from src.rootfs_manager import RootFSManager
 from src.scan_state import ScanState
 from src.system_checks import run_system_checks
-
-TOOL_VERSION = "2.0.0"
 
 logger = logging.getLogger("image-cgroupsv2-inspector")
 
@@ -396,9 +395,10 @@ def setup_logging(log_to_file: bool, log_file: str, verbose: bool) -> logging.Lo
 
 def print_banner():
     """Print the application banner."""
-    banner = """
+    version_label = f"v{TOOL_VERSION}".ljust(10)
+    banner = f"""
 ╔══════════════════════════════════════════════════════════════╗
-║           image-cgroupsv2-inspector v2.0.0                   ║
+║           image-cgroupsv2-inspector {version_label}               ║
 ║  Container Image Inspector for cgroups v2 Compatibility      ║
 ║  Supports: OpenShift cluster scan | Quay registry scan       ║
 ╚══════════════════════════════════════════════════════════════╝
