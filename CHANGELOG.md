@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.0] — Unreleased
+## [2.5.0] — 2026-05-18
 
 ### Added
 - **HTML report** alongside the CSV output (#62): new `--html-report`
