@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `CLAUDE.md` at the repo root: orientation file for Claude Code with
+  dev environment, common commands, architecture overview, and
+  project-specific invariants.
+- `AGENTS.md` symlink to `CLAUDE.md` so vendor-neutral agents (Codex,
+  Cursor, Aider, …) pick up the same orientation file.
+
 ### Fixed
 - CI `test` job now actually runs `pytest`. The job installed
   `pytest`/`pytest-cov` and uploaded `coverage.xml` but never invoked
