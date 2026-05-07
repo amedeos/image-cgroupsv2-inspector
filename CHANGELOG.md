@@ -56,7 +56,7 @@ All notable changes to this project will be documented in this file.
   directly when its hostname matches `NO_PROXY` (exact or `.suffix`
   match) and via the proxy otherwise.
 
-## [2.5.0] — 2026-05-18
+## [2.5.0] — 2026-04-18
 
 ### Added
 - **HTML report** alongside the CSV output (#62): new `--html-report`
