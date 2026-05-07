@@ -5,16 +5,18 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
 
-A tool to inspect container images for cgroups v2 compatibility. Supports scanning images from OpenShift clusters and Quay registries.
+A tool to inspect container images for cgroups v2 compatibility. Supports scanning images from OpenShift clusters, Quay registries, and JFrog Container Registry.
 
-This tool connects to an OpenShift cluster or a Quay registry, collects information about container images, and saves the information to a CSV file. In OpenShift mode it discovers images from running workloads (pods, deployments, statefulsets, daemonsets, jobs, and cronjobs). In registry mode it enumerates repositories and tags in a Quay organization via the REST API.
+This tool connects to an OpenShift cluster, a Quay registry, or a JFrog Container Registry, collects information about container images, and saves the information to a CSV file. In OpenShift mode it discovers images from running workloads (pods, deployments, statefulsets, daemonsets, jobs, and cronjobs). In Quay mode it enumerates repositories and tags in a Quay organization via the REST API. In JFrog mode it enumerates Docker images and tags inside a JFrog Artifactory repository via the Docker Registry v2 API.
 
 ## Features
 
 - 🔌 Connect to OpenShift cluster via API URL and bearer token
 - 🏭 Connect to Quay registry via API URL and Application Token
+- 🐸 Connect to JFrog Container Registry via Bearer access token (Artifactory CE-friendly)
 - 🔑 Automatically download and save cluster pull-secret to `.pull-secret` (skipped if the file already exists)
 - 🔑 Automatic auth.json generation from Quay token for podman pulls
+- 🔑 Automatic auth.json generation from JFrog username + token for podman pulls
 - 📦 Collect container images from:
   - Pods
   - Deployments
@@ -25,6 +27,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
   - CronJobs
   - ReplicaSets
 - 📦 Collect container images from Quay organizations and repositories
+- 📦 Collect container images from JFrog Docker repositories (entire repo or single image)
 - 🏷️ Filter images by tag patterns (include/exclude globs, latest-only)
 - 💾 Save results to CSV with cluster name or registry host and timestamp
 - 🔐 Store credentials in `.env` file for reuse
@@ -67,7 +70,7 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 >
 > 2. **Pull Secret Configuration**: The cluster's pull-secret must contain valid credentials for all registries that host the container images you want to analyze. If credentials are missing or invalid, the tool will fail to pull and analyze those images. You can provide your own pull-secret file in podman-compatible format (JSON with `auths` structure) using the `--pull-secret` option. If the pull-secret file already exists at the specified path (default: `.pull-secret`), the tool will use it as-is and **will not** download the cluster pull-secret, avoiding accidental overwrites. The automatic download from the cluster only happens when the file does not exist yet.
 
-### Registry Mode Prerequisites
+### Quay Registry Mode Prerequisites
 
 > 1. **Network Access**: The Quay registry must be accessible from the host running `image-cgroupsv2-inspector`. Ensure there are no network restrictions, firewalls, or VPN requirements blocking access to the registry.
 >
@@ -83,16 +86,29 @@ This tool connects to an OpenShift cluster or a Quay registry, collects informat
 >
 > 3. **podman**: Required for pulling and analyzing container images (same as OpenShift mode).
 
-## Comparison: OpenShift vs Registry Mode
+### JFrog Container Registry Mode Prerequisites
 
-| Feature | OpenShift mode | Registry mode |
-|---------|----------------|---------------|
-| Data source | Running workloads (Pods, Deployments, etc.) | Quay registry API (repos and tags) |
-| Authentication | OpenShift bearer token (`oc whoami -t`) | Quay Application Token (OAuth token) |
-| Image discovery | Cluster API queries | Quay REST API |
-| Image analysis | Same (podman pull + binary scan) | Same (podman pull + binary scan) |
-| Use case | Post-deployment audit | Pre-deployment assessment / registry hygiene |
-| Pull secret | Cluster pull-secret or custom | Auto-generated from token or custom |
+> 1. **Network Access**: The JFrog Artifactory instance must be reachable from the host running `image-cgroupsv2-inspector` over both its REST API port (typically 8081/8082) and the Docker Registry v2 endpoints under `/artifactory/api/docker/{repo}/v2/...`.
+>
+> 2. **JFrog Authentication**: A JFrog **Bearer access token** is required. Identity tokens or admin access tokens both work as long as they grant read access to the target Docker repository. The same token is reused to populate `auth.json` for podman pulls during `--analyze`, paired with `--jfrog-username`.
+>
+>    To create a token in the JFrog Platform UI: **User profile → Generate an Identity Token**, or **Administration → User Management → Access Tokens** for service-account tokens.
+>
+>    **Note:** The tool only uses CE-compatible REST endpoints (`/api/system/ping`, `/api/repositories?type=local`, Docker Registry v2 catalog and tags, `/api/storage/...`). The Pro-only per-repo configuration endpoint (`/api/repositories/{repoKey}`) is **not** used, so Artifactory Community Edition is fully supported.
+>
+> 3. **podman**: Required for pulling and analyzing container images (same as the other modes).
+
+## Comparison: OpenShift vs Quay vs JFrog Mode
+
+| Feature | OpenShift mode | Quay mode | JFrog mode |
+|---------|----------------|-----------|------------|
+| Data source | Running workloads (Pods, Deployments, etc.) | Quay registry API (orgs, repos, tags) | JFrog Docker repository (images, tags) |
+| Authentication | OpenShift bearer token (`oc whoami -t`) | Quay Application Token (OAuth) | JFrog Bearer access token |
+| Image discovery | Cluster API queries | Quay REST API | Docker Registry v2 catalog + JFrog REST |
+| Image analysis | Same (podman pull + binary scan) | Same (podman pull + binary scan) | Same (podman pull + binary scan) |
+| Use case | Post-deployment audit | Pre-deployment assessment / registry hygiene | Pre-deployment assessment / registry hygiene |
+| Pull secret | Cluster pull-secret or custom | Auto-generated from token or custom | Auto-generated from username + token, or custom |
+| CSV `source` value | `openshift` | `quay` | `jfrog` |
 
 ## Requirements
 
@@ -237,6 +253,21 @@ podman run --rm \
   --analyze
 ```
 
+**Run (JFrog mode):**
+
+```bash
+podman run --rm \
+  -v ./output:/app/output \
+  -v /tmp/rootfs:/tmp/rootfs \
+  image-cgroupsv2-inspector \
+  --jfrog-url https://acme.jfrog.io \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local \
+  --jfrog-username my.user@acme.com \
+  --rootfs-path /tmp/rootfs \
+  --analyze
+```
+
 The container runs as root. For image pulls and analysis, podman runs inside the container; you may need appropriate capabilities or privileges (e.g. `--privileged` or volume mounts for `/var/lib/containers`) depending on your environment.
 
 ## Usage
@@ -319,7 +350,7 @@ The exclusion patterns support glob-style wildcards:
 - `openshift-*` matches `openshift-etcd`, `openshift-monitoring`, etc.
 - `*-test` matches `app-test`, `service-test`, etc.
 
-### Registry Scan Mode
+### Quay Registry Scan Mode
 
 #### Basic Usage
 
@@ -409,6 +440,65 @@ QUAY_REGISTRY_ORG=myorg
 
 These can also be set in the `.env` file. CLI arguments override environment variables.
 
+### JFrog Container Registry Scan Mode
+
+#### Basic Usage
+
+```bash
+# Enumerate every Docker image+tag in a JFrog repo (no analysis)
+./image-cgroupsv2-inspector \
+  --jfrog-url https://acme.jfrog.io \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local
+
+# Pull and analyze every image (requires --jfrog-username for podman login)
+./image-cgroupsv2-inspector \
+  --jfrog-url https://acme.jfrog.io \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local \
+  --jfrog-username my.user@acme.com \
+  --rootfs-path /tmp/images \
+  --analyze
+
+# Scan a single Docker image inside the JFrog repo
+./image-cgroupsv2-inspector \
+  --jfrog-url https://acme.jfrog.io \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local \
+  --jfrog-image java-compatible \
+  --jfrog-username my.user@acme.com \
+  --rootfs-path /tmp/images \
+  --analyze
+
+# Self-hosted Artifactory CE on a custom port (HTTP, no TLS verification)
+./image-cgroupsv2-inspector \
+  --jfrog-url http://artifactory.lab.example.com:8082 \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local \
+  --jfrog-username admin
+```
+
+The same `--include-tags` / `--exclude-tags` / `--latest-only` filters supported in Quay mode work in JFrog mode too — the implementation is shared.
+
+#### Generating a JFrog Access Token
+
+Either of these works:
+- **User identity token** — JFrog UI → user avatar → *Edit Profile* → *Generate an Identity Token*. Pair with `--jfrog-username <your-jfrog-user>` (typically the email).
+- **Service-account access token** — JFrog UI → *Administration → User Management → Access Tokens → Generate Token*. Use the associated username for `--jfrog-username`.
+
+The token must grant read access to the target Docker repository. For `--analyze` the token also feeds `auth.json` for `podman pull`, so make sure it works with the Docker v2 API too.
+
+#### Environment Variables
+
+```bash
+JFROG_URL=https://acme.jfrog.io
+JFROG_TOKEN=<bearer-token>
+JFROG_REPO=docker-local
+JFROG_USERNAME=my.user@acme.com
+```
+
+These can also be set in the `.env` file. CLI arguments override environment variables.
+
 ### Resuming Interrupted Scans
 
 On large clusters or registries with thousands of images, scans can take hours. If a scan is interrupted (e.g., network failure, killed process), the `--resume` flag lets you restart where you left off instead of re-scanning all images from the beginning.
@@ -431,11 +521,20 @@ A JSON state file is written automatically during every `--analyze` run, trackin
 # Clean up by target name (no cluster/registry connection needed)
 ./image-cgroupsv2-inspector --clean-state ocp-prod
 
-# Registry mode works the same way
+# Quay mode works the same way
 ./image-cgroupsv2-inspector \
   --registry-url https://quay.example.com \
   --registry-token <token> \
   --registry-org myorg \
+  --rootfs-path /tmp/images \
+  --analyze --resume
+
+# JFrog mode works the same way
+./image-cgroupsv2-inspector \
+  --jfrog-url https://acme.jfrog.io \
+  --jfrog-token <bearer-token> \
+  --jfrog-repo docker-local \
+  --jfrog-username my.user@acme.com \
   --rootfs-path /tmp/images \
   --analyze --resume
 ```
@@ -529,10 +628,16 @@ You can also set credentials via environment variables or `.env` file:
 OPENSHIFT_API_URL=https://api.mycluster.example.com:6443
 OPENSHIFT_TOKEN=sha256~xxxxx
 
-# Registry mode
+# Quay mode
 QUAY_REGISTRY_URL=https://quay.example.com
 QUAY_REGISTRY_TOKEN=<token>
 QUAY_REGISTRY_ORG=myorg
+
+# JFrog mode
+JFROG_URL=https://acme.jfrog.io
+JFROG_TOKEN=<bearer-token>
+JFROG_REPO=docker-local
+JFROG_USERNAME=my.user@acme.com
 ```
 
 ## Short-Name Image Resolution

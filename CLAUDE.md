@@ -46,16 +46,18 @@ CI (`.github/workflows/ci.yml`) runs lint → test → container-build sequentia
 
 ## Architecture
 
-The tool inspects container images for cgroups v2 compatibility in two modes that share a single analysis pipeline. Understanding the layering matters because changes in one mode usually need a mirror change in the other.
+The tool inspects container images for cgroups v2 compatibility in three modes that share a single analysis pipeline. Understanding the layering matters because changes in one mode usually need a mirror change in the others.
 
-### Two collectors, one orchestrator, one CSV schema
+### Three collectors, one orchestrator, one CSV schema
 
 - `src/openshift_client.py` + `src/image_collector.py` — OpenShift mode. Talks to the cluster API, walks Pods/Deployments/DeploymentConfigs/StatefulSets/DaemonSets/Jobs/CronJobs/ReplicaSets, and resolves short-name images to FQDN by reading `status.containerStatuses[*].image` from running pods.
-- `src/quay_client.py` + `src/registry_collector.py` — Registry mode. Talks to the Quay REST API, enumerates repos/tags in an organization, applies include/exclude/latest-only tag filters.
-- Both collectors emit **plain dicts** that conform to the unified schema in `registry_collector.CSV_COLUMNS`. `source` is `"openshift"` or `"registry"`. Adding a column means updating `CSV_COLUMNS`, the `ANALYSIS_KEYS` tuple in `scan_state.py` (if it's an analysis result), and the `_apply_results` mapping in `analysis_orchestrator.py`.
+- `src/quay_client.py` + `src/registry_collector.py` — Quay mode. Talks to the Quay REST API, enumerates repos/tags in an organization, applies include/exclude/latest-only tag filters.
+- `src/jfrog_client.py` + `src/jfrog_collector.py` — JFrog mode. Bearer-auth client against an Artifactory Docker repository: `/api/system/ping` for connectivity, `/api/repositories?type=local` for repo discovery (CE-friendly — the Pro-only `/api/repositories/{repoKey}` is intentionally avoided), Docker Registry v2 catalog/tags for image+tag enumeration, and `/api/storage/...` to enrich each tag with `lastModified` (mapped to epoch `start_ts`).
+- Tag filtering (include/exclude globs, latest-only) lives in `src/_registry_filters.py` and is shared between the Quay and JFrog collectors.
+- All collectors emit **plain dicts** that conform to the unified schema in `registry_collector.CSV_COLUMNS`. `source` is `"openshift"`, `"quay"`, or `"jfrog"`. Adding a column means updating `CSV_COLUMNS`, the `ANALYSIS_KEYS` tuple in `scan_state.py` (if it's an analysis result), and the `_apply_results` mapping in `analysis_orchestrator.py`. Adding a fourth source value requires extending `_compute_source_mode` in `src/html_reporter.py`.
 - `src/analysis_orchestrator.py` is **source-agnostic**: it consumes the dicts, calls `ImageAnalyzer.analyze_image()` per unique `image_name`, applies the result back to every record sharing that name, and saves the CSV after each image (crash resilience).
 
-The CLI entrypoint `image-cgroupsv2-inspector` (no `.py` extension; `argparse`-driven, ~1080 lines) wires up which collector to use based on `--registry-url` vs `--api-url` (mutually exclusive). It is the **only** caller of the orchestrator and is where mode-specific output paths and pull-secret handling live.
+The CLI entrypoint `image-cgroupsv2-inspector` (no `.py` extension; `argparse`-driven) wires up which collector to use based on `--api-url` vs `--registry-url` vs `--jfrog-url` (triple mutual exclusion). It is the **only** caller of the orchestrator and is where mode-specific output paths and pull-secret handling live. `src/auth_utils.generate_registry_auth_json` produces a podman-compatible `auth.json` for both registry modes; the `username` parameter defaults to `$oauthtoken` (Quay convention) and accepts the JFrog login user when called from the JFrog branch.
 
 ### Image analysis pipeline (`src/image_analyzer.py`)
 
@@ -71,7 +73,7 @@ Per-image work is wrapped in a SIGALRM timer (`--image-timeout`, default 600s). 
 
 ### Resume / state (`src/scan_state.py`)
 
-Every `--analyze` run writes `.state_<target>.json` (target = cluster name or registry host) atomically after each image. The state file tracks three buckets: `completed_images` (skipped on resume), `error_images` and `timeout_images` (retried on resume). Cached analysis results in `image_results` are restored into the CSV on resume so prior successful work is never lost. Bumping `STATE_VERSION` requires backward compatibility consideration — the resume path warns on mismatch but still proceeds.
+Every `--analyze` run writes `.state_<target>.json` (target = cluster name, Quay registry host, or JFrog registry host) atomically after each image. The state file tracks three buckets: `completed_images` (skipped on resume), `error_images` and `timeout_images` (retried on resume). Cached analysis results in `image_results` are restored into the CSV on resume so prior successful work is never lost. Bumping `STATE_VERSION` requires backward compatibility consideration — the resume path warns on mismatch but still proceeds.
 
 ### HTML report (`src/html_reporter.py`, `src/templates/`)
 
