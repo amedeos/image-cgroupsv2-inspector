@@ -4,15 +4,19 @@ image-cgroupsv2-inspector
 =========================
 
 A tool to inspect container images for cgroups v2 compatibility.
-Supports two modes: OpenShift cluster scan and Quay registry scan.
+Supports three modes: OpenShift cluster scan, Quay registry scan,
+and JFrog Container Registry scan.
 
 Usage:
     # OpenShift mode
     ./image-cgroupsv2-inspector --api-url <URL> --token <TOKEN> [--rootfs-path <PATH>]
     ./image-cgroupsv2-inspector  # Uses credentials from .env file
 
-    # Registry mode
+    # Quay registry mode
     ./image-cgroupsv2-inspector --registry-url <URL> --registry-token <TOKEN> --registry-org <ORG>
+
+    # JFrog Container Registry mode
+    ./image-cgroupsv2-inspector --jfrog-url <URL> --jfrog-token <TOKEN> --jfrog-repo <REPO>
 
 Author: Amedeo
 License: See LICENSE file
@@ -33,6 +37,8 @@ from src.analysis_orchestrator import AnalysisOrchestrator
 from src.auth_utils import generate_registry_auth_json
 from src.html_reporter import generate_html_report
 from src.image_collector import ImageCollector
+from src.jfrog_client import JfrogClient, JfrogClientError
+from src.jfrog_collector import JfrogCollector
 from src.openshift_client import OpenShiftClient
 from src.quay_client import QuayClient, QuayClientError
 from src.registry_collector import RegistryCollector
@@ -49,7 +55,8 @@ def parse_arguments() -> argparse.Namespace:
         prog="image-cgroupsv2-inspector",
         description=(
             "Inspect container images for cgroups v2 compatibility.\n"
-            "Supports two modes: OpenShift cluster scan and Quay registry scan."
+            "Supports three modes: OpenShift cluster scan, Quay registry scan, "
+            "and JFrog Container Registry scan."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -78,6 +85,21 @@ Registry Mode Examples:
     --registry-org myorg \\
     --registry-repo myapp \\
     --exclude-tags "*-dev,*-snapshot" \\
+    --rootfs-path /tmp/images --analyze
+
+JFrog Container Registry Mode Examples:
+  # Enumerate every Docker image+tag in a JFrog repo (no analysis)
+  ./image-cgroupsv2-inspector \\
+    --jfrog-url https://acme.jfrog.io \\
+    --jfrog-token <bearer-token> \\
+    --jfrog-repo docker-local
+
+  # Analyze with podman pull (username paired with the access token)
+  ./image-cgroupsv2-inspector \\
+    --jfrog-url https://acme.jfrog.io \\
+    --jfrog-token <bearer-token> \\
+    --jfrog-repo docker-local \\
+    --jfrog-username my.user@acme.com \\
     --rootfs-path /tmp/images --analyze
 
   # Generate HTML report alongside CSV
@@ -294,6 +316,49 @@ The tool will save credentials to .env file after successful connection.
         help="Only scan the N most recent tags per repository",
     )
 
+    # --- JFrog Container Registry mode ---
+
+    parser.add_argument(
+        "--jfrog-url",
+        dest="jfrog_url",
+        type=str,
+        default="",
+        help="JFrog Artifactory base URL (e.g., https://acme.jfrog.io). Activates JFrog scan mode.",
+    )
+
+    parser.add_argument(
+        "--jfrog-token",
+        dest="jfrog_token",
+        type=str,
+        default="",
+        help="JFrog Bearer access token for authentication.",
+    )
+
+    parser.add_argument(
+        "--jfrog-repo",
+        dest="jfrog_repo",
+        type=str,
+        default="",
+        help="JFrog Docker repository key to scan (e.g., docker-local). Required in JFrog mode.",
+    )
+
+    parser.add_argument(
+        "--jfrog-image",
+        dest="jfrog_image",
+        type=str,
+        default=None,
+        help="Specific Docker image inside the JFrog repository to scan (optional, scans all images if omitted).",
+    )
+
+    parser.add_argument(
+        "--jfrog-username",
+        dest="jfrog_username",
+        type=str,
+        default="",
+        help="JFrog username paired with --jfrog-token for podman pulls during --analyze "
+        "(only required in --analyze mode).",
+    )
+
     # --- Resume / state ---
 
     parser.add_argument(
@@ -400,7 +465,7 @@ def print_banner():
 ╔══════════════════════════════════════════════════════════════╗
 ║           image-cgroupsv2-inspector {version_label}               ║
 ║  Container Image Inspector for cgroups v2 Compatibility      ║
-║  Supports: OpenShift cluster scan | Quay registry scan       ║
+║  Supports: OpenShift | Quay | JFrog Container Registry       ║
 ╚══════════════════════════════════════════════════════════════╝
     """
     print(banner)
@@ -588,6 +653,8 @@ def _run_report_only(args, logger: logging.Logger) -> int:
         incompatible.append("--api-url")
     if args.registry_url:
         incompatible.append("--registry-url")
+    if args.jfrog_url:
+        incompatible.append("--jfrog-url")
     if incompatible:
         print(f"\n✗ Error: --report-only is incompatible with: {', '.join(incompatible)}")
         logger.error("Incompatible flags with --report-only: %s", incompatible)
@@ -705,18 +772,209 @@ def main() -> int:
     if not args.registry_org:
         args.registry_org = os.environ.get("QUAY_REGISTRY_ORG", "")
 
+    # JFrog mode env var fallback
+    if not args.jfrog_url:
+        args.jfrog_url = os.environ.get("JFROG_URL", "")
+    if not args.jfrog_token:
+        args.jfrog_token = os.environ.get("JFROG_TOKEN", "")
+    if not args.jfrog_repo:
+        args.jfrog_repo = os.environ.get("JFROG_REPO", "")
+    if not args.jfrog_username:
+        args.jfrog_username = os.environ.get("JFROG_USERNAME", "")
+
     # Handle --clean-state with explicit target (no connection needed)
     if isinstance(args.clean_state, str):
         return _handle_clean_state(args.clean_state, state_dir)
 
     is_registry_mode = bool(args.registry_url)
+    is_jfrog_mode = bool(args.jfrog_url)
 
-    # Mutual exclusion check
-    if args.registry_url and args.api_url:
-        print("\n✗ Error: --registry-url and --api-url are mutually exclusive.")
-        print("  Use --registry-url for Quay registry scan mode.")
+    # Mutual exclusion check (triple: --api-url / --registry-url / --jfrog-url)
+    active_modes = [
+        flag
+        for flag, value in (
+            ("--api-url", args.api_url),
+            ("--registry-url", args.registry_url),
+            ("--jfrog-url", args.jfrog_url),
+        )
+        if value
+    ]
+    if len(active_modes) > 1:
+        print(f"\n✗ Error: {' and '.join(active_modes)} are mutually exclusive.")
         print("  Use --api-url for OpenShift cluster scan mode.")
+        print("  Use --registry-url for Quay registry scan mode.")
+        print("  Use --jfrog-url for JFrog Container Registry scan mode.")
         return 1
+
+    # ── JFrog mode ───────────────────────────────────────────────
+    if is_jfrog_mode:
+        if not args.jfrog_token:
+            print("\n✗ Error: --jfrog-token is required in JFrog mode.")
+            return 1
+        if not args.jfrog_repo:
+            print("\n✗ Error: --jfrog-repo is required in JFrog mode.")
+            return 1
+        if args.analyze and not args.jfrog_username:
+            print("\n✗ Error: --jfrog-username is required when --analyze is used in JFrog mode.")
+            print("  podman pull needs both username and token to log in to JFrog.")
+            return 1
+
+        from urllib.parse import urlparse
+
+        parsed = urlparse(args.jfrog_url)
+        registry_host = parsed.hostname
+        if parsed.port:
+            registry_host = f"{parsed.hostname}:{parsed.port}"
+
+        if args.clean_state is True:
+            return _handle_clean_state(registry_host, state_dir)
+
+        state_file_path = _build_state_file_path(registry_host, state_dir)
+
+        print(f"\n🔌 Connecting to JFrog registry: {args.jfrog_url}")
+        logger.info("Connecting to JFrog registry: %s", args.jfrog_url)
+        try:
+            jfrog_client = JfrogClient(
+                base_url=args.jfrog_url,
+                token=args.jfrog_token,
+                verify_ssl=args.verify_ssl,
+            )
+            jfrog_client.test_connection()
+            jfrog_client.check_repository(args.jfrog_repo)
+            print(f"✓ Connected to JFrog registry, repository: {args.jfrog_repo}")
+            logger.info("Connected to JFrog registry, repository: %s", args.jfrog_repo)
+        except JfrogClientError as e:
+            print(f"\n✗ JFrog connection error: {e}")
+            logger.error("JFrog connection error: %s", e)
+            return 1
+
+        try:
+            jfrog_collector = JfrogCollector(
+                jfrog_client=jfrog_client,
+                registry_host=registry_host,
+            )
+
+            include_tags = None
+            if args.include_tags:
+                include_tags = [p.strip() for p in args.include_tags.split(",") if p.strip()]
+            exclude_tags = None
+            if args.exclude_tags:
+                exclude_tags = [p.strip() for p in args.exclude_tags.split(",") if p.strip()]
+
+            images = jfrog_collector.collect_images(
+                repo=args.jfrog_repo,
+                image=args.jfrog_image,
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
+                latest_only=args.latest_only,
+            )
+
+            if not images:
+                print("\n⚠ No images found in the JFrog repository.")
+                logger.warning("No images found in the JFrog repository")
+                return 0
+
+            if args.deep_scan and not args.analyze:
+                print("\n✗ Error: --deep-scan requires --analyze to be specified.")
+                logger.error("--deep-scan requires --analyze")
+                return 1
+
+            if args.analyze:
+                if not args.rootfs_path:
+                    print("\n✗ Error: --analyze requires --rootfs-path.")
+                    logger.error("--analyze requires --rootfs-path")
+                    return 1
+
+                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                if pull_secret_explicitly_set and Path(args.pull_secret).exists():
+                    pull_secret_path = args.pull_secret
+                    print(f"🔑 Using pull-secret: {pull_secret_path}")
+                    logger.info("Using pull-secret: %s", pull_secret_path)
+                else:
+                    pull_secret_path = generate_registry_auth_json(
+                        registry_host=registry_host,
+                        token=args.jfrog_token,
+                        username=args.jfrog_username,
+                    )
+                    print(f"🔑 Generated registry auth file: {pull_secret_path}")
+                    logger.info("Generated registry auth file: %s", pull_secret_path)
+
+                manager = RootFSManager(args.rootfs_path)
+                rootfs_path = str(manager.get_rootfs_path().parent)
+
+                from datetime import datetime
+
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                output_path = Path(args.output_dir)
+                output_path.mkdir(parents=True, exist_ok=True)
+                csv_filepath = str(output_path / f"{registry_host}-{args.jfrog_repo}-{timestamp}.csv")
+
+                logger.info("Starting image analysis...")
+                orchestrator = AnalysisOrchestrator(
+                    rootfs_path=rootfs_path,
+                    pull_secret_path=pull_secret_path,
+                    image_timeout=args.image_timeout,
+                    state_file_path=state_file_path,
+                    resume=args.resume,
+                    target=registry_host,
+                    deep_scan=args.deep_scan,
+                    go_scan=go_scan_enabled,
+                )
+                _, csv_path, skipped = orchestrator.analyze_images(
+                    images=images,
+                    csv_filepath=csv_filepath,
+                    debug=args.verbose,
+                )
+                logger.info("Image analysis completed")
+            else:
+                csv_path = jfrog_collector.save_to_csv(images, output_dir=args.output_dir)
+                skipped = []
+                logger.info("Results saved to CSV: %s", csv_path)
+
+            print("\n📊 Summary:")
+            print(f"   Source: JFrog registry ({registry_host})")
+            print(f"   Repository: {args.jfrog_repo}")
+            print(f"   Total images: {len(images)}")
+            unique_count = len({img["image_name"] for img in images})
+            print(f"   Unique images: {unique_count}")
+            logger.debug(
+                "Summary: source=JFrog registry (%s), repo=%s, total=%d, unique=%d",
+                registry_host,
+                args.jfrog_repo,
+                len(images),
+                unique_count,
+            )
+
+            if args.analyze:
+                _print_analysis_summary(images, skipped)
+
+            print(f"\n   Output file: {csv_path}")
+            logger.debug("Output file: %s", csv_path)
+            _maybe_generate_html_report(
+                csv_path=csv_path,
+                output_dir=args.output_dir,
+                tool_version=TOOL_VERSION,
+                target=registry_host,
+                enabled=args.html_report,
+                logger=logger,
+            )
+
+        except Exception as e:
+            print(f"\n✗ Error during JFrog scan: {e}")
+            logger.error("Error during JFrog scan: %s", e)
+            if args.verbose:
+                import traceback
+
+                traceback.print_exc()
+            logger.exception("Full traceback:")
+            return 1
+
+        logger.info("=" * 60)
+        logger.info("image-cgroupsv2-inspector completed successfully")
+        logger.info("=" * 60)
+
+        print("\n✓ Done!")
+        return 2 if skipped else 0
 
     # ── Registry mode ────────────────────────────────────────────
     if is_registry_mode:

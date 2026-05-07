@@ -17,23 +17,29 @@ def generate_registry_auth_json(
     registry_host: str,
     token: str,
     output_path: str = ".pull-secret-registry",
+    username: str = "$oauthtoken",
 ) -> str:
-    """Generate a podman-compatible auth.json from a Quay token.
+    """Generate a podman-compatible auth.json from a registry token.
 
-    For OAuth tokens, uses "$oauthtoken" as the username.
-    The generated file is in the standard podman auth format.
+    The username defaults to ``$oauthtoken`` which is the convention
+    Quay uses for OAuth tokens. For other registries (e.g. JFrog with
+    a Bearer access token) pass the actual login username instead.
 
-    If the file already exists, it is overwritten.
+    The generated file is in the standard podman auth format. If the
+    file already exists, it is overwritten.
 
     Args:
-        registry_host: Registry hostname (e.g., "quay.example.com").
-        token: Quay OAuth token or robot account token.
+        registry_host: Registry hostname (e.g., "quay.example.com" or
+            "acme.jfrog.io").
+        token: Registry token used as the password component.
         output_path: Path to write the auth.json file.
+        username: Username paired with ``token`` in the basic-auth
+            credential. Defaults to ``$oauthtoken`` (Quay convention).
 
     Returns:
         Absolute path to the generated auth.json file.
     """
-    credentials = f"$oauthtoken:{token}"
+    credentials = f"{username}:{token}"
     encoded = base64.b64encode(credentials.encode()).decode()
 
     auth_data = {

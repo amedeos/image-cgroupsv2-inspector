@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **JFrog Container Registry scan mode**: new `--jfrog-url`,
+  `--jfrog-token`, `--jfrog-repo`, `--jfrog-image`, `--jfrog-username`
+  CLI flags (with `JFROG_*` env-var fallbacks) activate scanning
+  against a JFrog Artifactory Docker repository. Authenticates via
+  Bearer access token; mutually exclusive with `--api-url` and
+  `--registry-url`. Emits `source=jfrog` in the unified CSV.
+- `src/jfrog_client.py` and `src/jfrog_collector.py`: speculate the
+  Quay equivalents but use the CE-friendly `/api/repositories?type=local`
+  + Docker Registry v2 catalog/tags endpoints, avoiding the Pro-gated
+  per-repo configuration endpoint.
+- `src/_registry_filters.py`: shared `filter_tags()` helper used by
+  both Quay and JFrog collectors (extracted from `RegistryCollector`).
 - `manifests/jfrog/jfrog-setup.sh` and `manifests/jfrog/jfrog-teardown.sh`:
   publish and remove the test-image catalog on a JFrog Container
   Registry instance using Bearer access-token authentication. Mirror
