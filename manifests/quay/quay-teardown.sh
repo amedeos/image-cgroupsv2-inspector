@@ -27,6 +27,9 @@
 ###############################################################################
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFESTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # ---------------------------------------------------------------------------
 # Color helpers
 # ---------------------------------------------------------------------------
@@ -54,31 +57,9 @@ DELETE_SUCCESS=0
 DELETE_FAIL=0
 FAILED_REPOS=()
 
-TEST_REPOS=(
-    java-compatible
-    java-incompatible
-    node-compatible
-    node-incompatible
-    dotnet-compatible
-    dotnet-incompatible
-    no-runtime
-    deep-scan-entrypoint-cgv1
-    deep-scan-source-cgv1
-    deep-scan-binary-cgv1
-    deep-scan-exec-cgv1
-    deep-scan-cadvisor
-    deep-scan-node-exporter
-    deep-scan-nginx-negative
-    deep-scan-redis-negative
-    # Go cgroups v2 compliance test images
-    deep-scan-go-v2-compliant-runtime
-    deep-scan-go-v2-compliant-automaxprocs
-    deep-scan-go-v2-compliant-lib-only
-    deep-scan-go-v2-needs-review
-    deep-scan-go-v2-unaware
-    deep-scan-c-binary-no-go
-    deep-scan-go-v2-compliant-combo
-)
+# Source the shared catalog: brings in TEST_REPOS and UPSTREAM_TEST_IMAGES.
+# shellcheck source=../test-images.sh
+source "${MANIFESTS_DIR}/test-images.sh"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -236,23 +217,8 @@ cleanup_local_images() {
         fi
     done
 
-    # Also clean up the upstream images that were pulled
-    local upstream_images=(
-        "registry.access.redhat.com/ubi8/openjdk-17:latest"
-        "registry.access.redhat.com/ubi8/openjdk-8:1.14"
-        "docker.io/library/node:20-slim"
-        "docker.io/library/node:18-slim"
-        "mcr.microsoft.com/dotnet/runtime:8.0"
-        "mcr.microsoft.com/dotnet/core/runtime:3.0"
-        "registry.access.redhat.com/ubi9-minimal:latest"
-        "gcr.io/cadvisor/cadvisor:v0.44.0"
-        "docker.io/prom/node-exporter:v1.3.1"
-        "docker.io/library/nginx:1.25-alpine"
-        "docker.io/library/redis:7-alpine"
-    )
-
     info "Cleaning up upstream images ..."
-    for img in "${upstream_images[@]}"; do
+    for img in "${UPSTREAM_TEST_IMAGES[@]}"; do
         if podman image exists "$img" 2>/dev/null; then
             info "  Removing ${img} ..."
             podman rmi "$img" 2>/dev/null || warn "  Could not remove ${img}"
