@@ -110,14 +110,23 @@ def test_build_context_source_mode(tmp_path: Path):
     ctx_os = build_report_context(csv_path=os_csv, tool_version="2.0.0", generated_at=FIXED_TS)
     assert ctx_os["metadata"]["source_mode"] == "openshift"
 
-    reg_csv = tmp_path / "reg_only.csv"
-    reg_csv.write_text(
+    quay_csv = tmp_path / "quay_only.csv"
+    quay_csv.write_text(
         CSV_HEADER
-        + "registry,,,,,org,repo,img:v1,sha256:x,"
+        + "quay,,,,,org,repo,img:v1,sha256:x,"
         + "None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,\n"
     )
-    ctx_reg = build_report_context(csv_path=reg_csv, tool_version="2.0.0", generated_at=FIXED_TS)
-    assert ctx_reg["metadata"]["source_mode"] == "registry"
+    ctx_quay = build_report_context(csv_path=quay_csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    assert ctx_quay["metadata"]["source_mode"] == "quay"
+
+    jfrog_csv = tmp_path / "jfrog_only.csv"
+    jfrog_csv.write_text(
+        CSV_HEADER
+        + "jfrog,,,,,org,repo,img:v1,sha256:x,"
+        + "None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,\n"
+    )
+    ctx_jfrog = build_report_context(csv_path=jfrog_csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    assert ctx_jfrog["metadata"]["source_mode"] == "jfrog"
 
 
 def test_build_context_empty_csv(tmp_path: Path):

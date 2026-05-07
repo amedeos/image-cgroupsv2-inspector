@@ -43,7 +43,7 @@ _REGISTRY_BASE_ARGS = [
 def _sample_images(n=3):
     return [
         {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",

@@ -55,7 +55,7 @@ def _sample_images(n=3):
     """Return a list of n sample image dicts with unified schema keys."""
     return [
         {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",
@@ -670,10 +670,10 @@ class TestPrintAnalysisSummary:
         assert "Java found in: 0 containers" in out
         assert "compatible" not in out.split("Java")[1].split("Node")[0]
 
-    def test_works_with_registry_source(self, capsys):
+    def test_works_with_quay_source(self, capsys):
         images = [
             {
-                "source": "registry",
+                "source": "quay",
                 "java_binary": "/usr/bin/java",
                 "java_cgroup_v2_compatible": "Yes",
             },

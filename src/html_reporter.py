@@ -194,8 +194,10 @@ def _compute_source_mode(sources: set[str]) -> str:
         return "unknown"
     if sources == {"openshift"}:
         return "openshift"
-    if sources == {"registry"}:
-        return "registry"
+    if sources == {"quay"}:
+        return "quay"
+    if sources == {"jfrog"}:
+        return "jfrog"
     return "mixed"
 
 

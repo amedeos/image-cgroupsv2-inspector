@@ -48,7 +48,7 @@ def sample_images():
     """Sample image records in unified schema."""
     return [
         {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",
@@ -59,7 +59,7 @@ def sample_images():
             "image_id": "",
         },
         {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",
@@ -70,7 +70,7 @@ def sample_images():
             "image_id": "",
         },
         {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",

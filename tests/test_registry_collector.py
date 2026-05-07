@@ -98,9 +98,9 @@ class TestRegistryCollectorCollectImages:
         for img in images:
             assert expected_keys.issubset(img.keys())
 
-    def test_source_is_registry(self, collector):
+    def test_source_is_quay(self, collector):
         images = collector.collect_images("testorg", repo="java-compatible")
-        assert all(img["source"] == "registry" for img in images)
+        assert all(img["source"] == "quay" for img in images)
 
     def test_openshift_fields_empty(self, collector):
         images = collector.collect_images("testorg", repo="java-compatible")
@@ -267,7 +267,7 @@ class TestRegistryCollectorSaveToCSV:
             rows = list(reader)
 
         for row in rows:
-            assert row["source"] == "registry"
+            assert row["source"] == "quay"
             assert row["registry_org"] == "testorg"
             assert row["registry_repo"] == "java-compatible"
             assert row["image_name"].startswith("quay.example.com/testorg/java-compatible:")

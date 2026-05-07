@@ -75,7 +75,7 @@ class RegistryCollector:
             Image record dict with all unified schema keys.
         """
         return {
-            "source": "registry",
+            "source": "quay",
             "container_name": "",
             "namespace": "",
             "object_type": "",

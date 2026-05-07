@@ -9,7 +9,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "broken-image",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "error": "podman pull failed: manifest unknown",
@@ -71,7 +71,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "ds-v1only",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -120,7 +120,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "ds-v2aware",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -170,7 +170,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "go-modern",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -215,7 +215,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "go-old",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -260,7 +260,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "go-review",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -305,7 +305,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "java-app",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -350,7 +350,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "java-old",
-          "source": "registry"
+          "source": "quay"
         },
         {
           "container_name": "myapp-container",
@@ -413,7 +413,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "java-unknown",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {
@@ -458,7 +458,7 @@
           "object_type": "",
           "registry_org": "myorg",
           "registry_repo": "nginx-base",
-          "source": "registry"
+          "source": "quay"
         }
       ],
       "deep_scan": {

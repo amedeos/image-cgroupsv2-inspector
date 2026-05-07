@@ -22,6 +22,13 @@ All notable changes to this project will be documented in this file.
 - `AGENTS.md` symlink to `CLAUDE.md` so vendor-neutral agents (Codex,
   Cursor, Aider, …) pick up the same orientation file.
 
+### Changed
+- CSV `source` column: Quay registry scans now emit `quay` (was
+  `registry`); the new value `jfrog` is reserved for the upcoming
+  JFrog scan mode. HTML report `source_mode` follows the same vocabulary.
+  Breaking change for downstream consumers that filtered on
+  `source == "registry"`.
+
 ### Fixed
 - CI `test` job now actually runs `pytest`. The job installed
   `pytest`/`pytest-cov` and uploaded `coverage.xml` but never invoked
