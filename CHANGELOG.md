@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `manifests/jfrog/jfrog-setup.sh` and `manifests/jfrog/jfrog-teardown.sh`:
+  publish and remove the test-image catalog on a JFrog Container
+  Registry instance using Bearer access-token authentication. Mirror
+  the existing Quay scripts and reuse the same Containerfile contexts
+  under `manifests/quay/deep-scan-images/`.
+- `manifests/test-images.sh` shared library: extracts the canonical
+  test-image catalog (`TEST_REPOS`, `UPSTREAM_TEST_IMAGES`,
+  `push_test_images`) so Quay and JFrog setup/teardown scripts no
+  longer duplicate the list.
+- CI: bash syntax-check (`bash -n`) for all `manifests/**/*.sh` and
+  `feature/jfrog-registry-scan` added to push/PR triggers.
 - `CLAUDE.md` at the repo root: orientation file for Claude Code with
   dev environment, common commands, architecture overview, and
   project-specific invariants.

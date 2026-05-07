@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/quay-registry-scan]
+    branches: [main, feature/quay-registry-scan, feature/jfrog-registry-scan]
   pull_request:
-    branches: [main, feature/quay-registry-scan]
+    branches: [main, feature/quay-registry-scan, feature/jfrog-registry-scan]
 
 jobs:
   lint:
@@ -28,6 +28,14 @@ jobs:
 
       - name: Check formatting with ruff
         run: ruff format --check .
+
+      - name: Syntax-check bash scripts
+        run: |
+          bash -n manifests/test-images.sh
+          bash -n manifests/quay/quay-setup.sh
+          bash -n manifests/quay/quay-teardown.sh
+          bash -n manifests/jfrog/jfrog-setup.sh
+          bash -n manifests/jfrog/jfrog-teardown.sh
 
   test:
     runs-on: ubuntu-latest
