@@ -33,6 +33,11 @@ All notable changes to this project will be documented in this file.
   project-specific invariants.
 - `AGENTS.md` symlink to `CLAUDE.md` so vendor-neutral agents (Codex,
   Cursor, Aider, …) pick up the same orientation file.
+- `quay-vs-jfrog.md`: deep-dive comparison of the Quay REST API vs
+  the JFrog Artifactory + Docker Registry v2 API set as exercised by
+  this project's clients. Covers endpoint mapping, pagination, filter
+  semantics, cost/latency trade-offs, deletion asymmetries, and the
+  CE-vs-Pro endpoint split.
 
 ### Changed
 - CSV `source` column: Quay registry scans now emit `quay` (was
