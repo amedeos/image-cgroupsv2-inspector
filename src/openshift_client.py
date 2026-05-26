@@ -112,16 +112,21 @@ class OpenShiftClient:
         # automatically respect the standard proxy env vars, so we read them
         # here and set them explicitly on the Configuration object.
         _no_proxy = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
-        _proxy    = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or                     os.environ.get("HTTP_PROXY")  or os.environ.get("http_proxy")  or ""
+        _proxy = (
+            os.environ.get("HTTPS_PROXY")
+            or os.environ.get("https_proxy")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("http_proxy")
+            or ""
+        )
         if _no_proxy:
             configuration.no_proxy = _no_proxy
         if _proxy:
-            from urllib.parse import urlparse as _urlparse
-            _parsed = _urlparse(self.api_url)
-            _host   = _parsed.hostname or ""
+            _host = urlparse(self.api_url).hostname or ""
             _bypass = any(
                 _host == e.strip().lstrip(".") or _host.endswith("." + e.strip().lstrip("."))
-                for e in _no_proxy.split(",") if e.strip()
+                for e in _no_proxy.split(",")
+                if e.strip()
             )
             if not _bypass:
                 configuration.proxy = _proxy
