@@ -18,6 +18,13 @@ All notable changes to this project will be documented in this file.
   new `Run tests` step executes `pytest tests/ -v --cov=src
   --cov-report=xml --cov-report=term` and produces the coverage report
   referenced by the existing upload step.
+- Proxy env vars (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` and lowercase
+  variants) are now honoured by the OpenShift API client (#67). The
+  underlying `kubernetes` library uses `urllib3` directly and does not
+  read these env vars automatically, which caused 504 Gateway Timeout
+  in proxied containerised deployments. The API host is reached
+  directly when its hostname matches `NO_PROXY` (exact or `.suffix`
+  match) and via the proxy otherwise.
 
 ## [2.5.0] — 2026-05-18
 
