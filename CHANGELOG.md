@@ -53,6 +53,11 @@ All notable changes to this project will be documented in this file.
   new `Run tests` step executes `pytest tests/ -v --cov=src
   --cov-report=xml --cov-report=term` and produces the coverage report
   referenced by the existing upload step.
+- OpenShift mode now configures bearer-token auth the way the Python
+  Kubernetes client expects, so valid `--token` values are no longer
+  dropped on protected API calls. `connect()` also performs an
+  authenticated OpenShift API check instead of treating the unauthenticated
+  `/version` probe as sufficient.
 - Proxy env vars (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` and lowercase
   variants) are now honoured by the OpenShift API client (#67). The
   underlying `kubernetes` library uses `urllib3` directly and does not

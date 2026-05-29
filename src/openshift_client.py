@@ -104,7 +104,8 @@ class OpenShiftClient:
         # Configure the client
         configuration = Configuration()
         configuration.host = self.api_url
-        configuration.api_key = {"authorization": f"Bearer {self.token}"}
+        configuration.api_key = {"BearerToken": self.token}
+        configuration.api_key_prefix = {"BearerToken": "Bearer"}
         configuration.verify_ssl = self.verify_ssl
 
         # Honour NO_PROXY / no_proxy env vars for the kubernetes client.
@@ -138,8 +139,10 @@ class OpenShiftClient:
         try:
             version_api = client.VersionApi(self._api_client)
             version_info = version_api.get_code()
+            username = self._get_authenticated_username()
             logger.debug("Connected to OpenShift cluster")
             logger.debug("Kubernetes version: %s", version_info.git_version)
+            logger.debug("Authenticated OpenShift user: %s", username)
             print("✓ Connected to OpenShift cluster")
             print(f"  Kubernetes version: {version_info.git_version}")
 
@@ -155,6 +158,27 @@ class OpenShiftClient:
         except Exception as e:
             self._api_client = None
             raise Exception(f"Failed to connect to OpenShift cluster: {e}")
+
+    def _get_authenticated_username(self) -> str:
+        """Return the current authenticated OpenShift username."""
+        try:
+            user = self.get_custom_objects_api().get_cluster_custom_object(
+                group="user.openshift.io",
+                version="v1",
+                plural="users",
+                name="~",
+            )
+        except ApiException as e:
+            if e.status in (401, 403):
+                raise RuntimeError(
+                    f"token was not accepted for authenticated OpenShift API access ({e.status} {e.reason})"
+                ) from e
+            raise
+
+        username = user.get("metadata", {}).get("name", "")
+        if not username:
+            raise RuntimeError("authenticated OpenShift user lookup returned no metadata.name")
+        return username
 
     def _save_to_env(self) -> None:
         """Save API URL and token to .env file."""
