@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────
+  # Lint + Test gate (same as CI)
+  # ───────────────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip && pip install -r requirements.txt && pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip && pip install -r requirements.txt && pip install pytest pytest-cov
+      - run: pytest tests/ -v --cov=src --cov-report=term
+
+  # ───────────────────────────────────────────────────────────────────
+  # Binary builds — native runners for each arch (no emulation overhead)
+  # ───────────────────────────────────────────────────────────────────
+  build-binaries:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            runner: ubuntu-latest
+            artifact_name: image-cgroupsv2-inspector-linux-amd64
+          - os: ubuntu-latest
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            artifact_name: image-cgroupsv2-inspector-linux-arm64
+          - os: macos
+            arch: arm64
+            runner: macos-latest
+            artifact_name: image-cgroupsv2-inspector-darwin-arm64
+          - os: macos
+            arch: amd64
+            runner: macos-13
+            artifact_name: image-cgroupsv2-inspector-darwin-amd64
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            artifact_name: image-cgroupsv2-inspector-windows-amd64.exe
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary with PyInstaller (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          pyinstaller --onefile --name "${{ matrix.artifact_name }}" \
+            --add-data "src:src" \
+            --hidden-import=src \
+            image-cgroupsv2-inspector
+
+      - name: Build binary with PyInstaller (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --name "${{ matrix.artifact_name }}" `
+            --add-data "src;src" `
+            --hidden-import=src `
+            image-cgroupsv2-inspector
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  # ───────────────────────────────────────────────────────────────────
+  # Container image — multi-arch (amd64 + arm64) push to ghcr.io
+  # ───────────────────────────────────────────────────────────────────
+  container-release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ───────────────────────────────────────────────────────────────────
+  # GitHub Release with all binaries attached
+  # ───────────────────────────────────────────────────────────────────
+  create-release:
+    needs: [build-binaries, container-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*
