@@ -145,6 +145,7 @@ class OpenShiftClient:
             logger.debug("Authenticated OpenShift user: %s", username)
             print("✓ Connected to OpenShift cluster")
             print(f"  Kubernetes version: {version_info.git_version}")
+            print(f"  Authenticated as: {username}")
 
             self._cluster_name = self._extract_cluster_name()
             logger.debug("Cluster name: %s", self._cluster_name)

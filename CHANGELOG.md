@@ -57,7 +57,8 @@ All notable changes to this project will be documented in this file.
   Kubernetes client expects, so valid `--token` values are no longer
   dropped on protected API calls. `connect()` also performs an
   authenticated OpenShift API check instead of treating the unauthenticated
-  `/version` probe as sufficient.
+  `/version` probe as sufficient. The authenticated username is now
+  printed during connection for operator feedback.
 - Proxy env vars (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` and lowercase
   variants) are now honoured by the OpenShift API client (#67). The
   underlying `kubernetes` library uses `urllib3` directly and does not
