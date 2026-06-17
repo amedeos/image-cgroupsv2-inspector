@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   same layer to keep the image smaller.
 
 ### Added
+- README: document the prebuilt images published on Quay.io
+  (`quay.io/asalvati/image-cgroupsv2-inspector`) with a `podman pull` example.
 - CI: release workflow (`release.yml`) builds standalone binaries for
   Linux/macOS × amd64/arm64 using native runners (ARM runner for ARM
   builds), and pushes multi-arch container image to `ghcr.io`. ARM64

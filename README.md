@@ -210,6 +210,16 @@ pip install -r requirements.txt
 
 You can build and run the tool as a container (UBI 9, Python 3.12). The image includes `podman`, `acl`, and `golang`, so Go binary scanning is enabled by default. The image uses the main script as the entrypoint.
 
+**Pull (prebuilt image):**
+
+Prebuilt images are published to Quay.io at
+[quay.io/asalvati/image-cgroupsv2-inspector](https://quay.io/repository/asalvati/image-cgroupsv2-inspector):
+
+```bash
+podman pull quay.io/asalvati/image-cgroupsv2-inspector:latest
+# or: docker pull quay.io/asalvati/image-cgroupsv2-inspector:latest
+```
+
 **Build:**
 
 ```bash
