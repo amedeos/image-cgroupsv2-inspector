@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- Containerfile now runs `dnf update` during build so base-image packages are
+  patched to the latest errata, clearing fixable OS-package CVEs.
+
+### Changed
+- Containerfile installs with `tsflags=nodocs` and clears the dnf cache in the
+  same layer to keep the image smaller.
+
 ### Added
 - CI: release workflow (`release.yml`) builds standalone binaries for
   Linux/macOS × amd64/arm64 using native runners (ARM runner for ARM
