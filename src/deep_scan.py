@@ -15,6 +15,7 @@ Confidence levels:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -180,7 +181,7 @@ _SET_PATTERN = re.compile(
     re.MULTILINE,
 )
 
-_DEFAULT_PATH_DIRS = (
+DEFAULT_PATH_DIRS = (
     "usr/local/sbin",
     "usr/local/bin",
     "usr/sbin",
@@ -227,6 +228,12 @@ def _is_shell_script(file_path: Path) -> bool:
         return False
 
 
+def _is_within_rootfs(resolved: Path, extract_path: Path) -> bool:
+    """Return True if *resolved* is strictly inside *extract_path*."""
+    prefix = str(extract_path.resolve()) + os.sep
+    return str(resolved).startswith(prefix)
+
+
 def _resolve_script_in_rootfs(
     script_ref: str,
     extract_path: Path,
@@ -238,7 +245,7 @@ def _resolve_script_in_rootfs(
     Handles:
     - Absolute paths: /usr/local/bin/entrypoint.sh
     - Relative paths: ./helpers.sh (resolved relative to `relative_to`)
-    - Bare commands: searched in _DEFAULT_PATH_DIRS + extra_path_dirs
+    - Bare commands: searched in DEFAULT_PATH_DIRS + extra_path_dirs
     - Shell variable paths: ${SCRIPT_DIR}/helpers.sh, $DIR/helpers.sh
       → extracts the filename and tries relative resolution against
         the directory of the sourcing script
@@ -260,7 +267,7 @@ def _resolve_script_in_rootfs(
                 candidate = relative_to / filename
                 try:
                     resolved = candidate.resolve()
-                    if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                    if _is_within_rootfs(resolved, extract_path) and resolved.is_file():
                         return resolved
                 except (OSError, ValueError):
                     pass
@@ -272,18 +279,18 @@ def _resolve_script_in_rootfs(
             candidate = relative_to / script_ref
             try:
                 resolved = candidate.resolve()
-                if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                if _is_within_rootfs(resolved, extract_path) and resolved.is_file():
                     return resolved
             except (OSError, ValueError):
                 pass
-        search_dirs = _DEFAULT_PATH_DIRS
+        search_dirs = DEFAULT_PATH_DIRS
         if extra_path_dirs:
-            search_dirs = extra_path_dirs + _DEFAULT_PATH_DIRS
+            search_dirs = extra_path_dirs + DEFAULT_PATH_DIRS
         for path_dir in search_dirs:
             candidate = extract_path / path_dir / script_ref
             try:
                 resolved = candidate.resolve()
-                if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                if _is_within_rootfs(resolved, extract_path) and resolved.is_file():
                     return resolved
             except (OSError, ValueError):
                 continue
@@ -296,7 +303,7 @@ def _resolve_script_in_rootfs(
 
     try:
         resolved = candidate.resolve()
-        if not str(resolved).startswith(str(extract_path.resolve())):
+        if not _is_within_rootfs(resolved, extract_path):
             return None
         if resolved.is_file():
             return resolved

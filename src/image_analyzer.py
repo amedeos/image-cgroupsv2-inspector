@@ -12,6 +12,7 @@ Supported runtimes and minimum versions for cgroup v2:
 """
 
 import contextlib
+import json
 import logging
 import os
 import re
@@ -484,9 +485,7 @@ class ImageAnalyzer:
         Returns:
             Tuple of extra directory strings (relative to rootfs), or None.
         """
-        import json
-
-        from .deep_scan import _DEFAULT_PATH_DIRS
+        from .deep_scan import DEFAULT_PATH_DIRS
 
         exit_code, stdout, _stderr = self._run_command(
             ["podman", "inspect", "--format", "{{json .Config.Env}}", image_name],
@@ -501,7 +500,7 @@ class ImageAnalyzer:
         except (json.JSONDecodeError, TypeError):
             return None
 
-        default_set = set(_DEFAULT_PATH_DIRS)
+        default_set = set(DEFAULT_PATH_DIRS)
         for env_var in env_list or []:
             if env_var.startswith("PATH="):
                 dirs = env_var[5:].split(":")
