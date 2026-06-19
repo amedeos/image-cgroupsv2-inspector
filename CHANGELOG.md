@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-06-19
+
 ### Security
 - Containerfile now runs `dnf update` during build so base-image packages are
   patched to the latest errata, clearing fixable OS-package CVEs.
