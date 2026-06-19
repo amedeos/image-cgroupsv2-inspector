@@ -227,10 +227,10 @@ section { margin: 30px 0; }
           <span class="used-by-count">{{ img.used_by_count }}</span>
           <script type="application/json" class="consumers-data">{{ img.consumers|tojson }}</script>
         </td>
-        <td>{{ img.java.compatible }}{% if img.java.version and img.java.version != "None" %} ({{ img.java.version }}){% endif %}</td>
-        <td>{{ img.node.compatible }}{% if img.node.version and img.node.version != "None" %} ({{ img.node.version }}){% endif %}</td>
-        <td>{{ img.dotnet.compatible }}{% if img.dotnet.version and img.dotnet.version != "None" %} ({{ img.dotnet.version }}){% endif %}</td>
-        <td>{{ img.go.compatible }}{% if img.go.version and img.go.version != "None" %} ({{ img.go.version }}){% endif %}</td>
+        <td>{{ img.java.compatible }}{% if img.java.version and img.java.version != "None" %} ({{ img.java.version }}){% endif %}{% if img.java.binary and img.java.binary != "None" %}<br><small>{{ img.java.binary }}</small>{% endif %}</td>
+        <td>{{ img.node.compatible }}{% if img.node.version and img.node.version != "None" %} ({{ img.node.version }}){% endif %}{% if img.node.binary and img.node.binary != "None" %}<br><small>{{ img.node.binary }}</small>{% endif %}</td>
+        <td>{{ img.dotnet.compatible }}{% if img.dotnet.version and img.dotnet.version != "None" %} ({{ img.dotnet.version }}){% endif %}{% if img.dotnet.binary and img.dotnet.binary != "None" %}<br><small>{{ img.dotnet.binary }}</small>{% endif %}</td>
+        <td>{{ img.go.compatible }}{% if img.go.version and img.go.version != "None" %} ({{ img.go.version }}){% endif %}{% if img.go.binary and img.go.binary != "None" %}<br><small>{{ img.go.binary }}</small>{% endif %}</td>
         <td>
           {% if img.deep_scan.match %}
           {{ img.deep_scan.confidence }}{% if img.deep_scan.v2_aware %} (v2-aware){% else %} (v1-only){% endif %}

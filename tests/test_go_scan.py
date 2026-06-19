@@ -1,10 +1,13 @@
 """Tests for the go_scan module — Go binary cgroups v2 compatibility logic."""
 
+from unittest.mock import patch
+
 from src.go_scan import (
     GO_V2_AWARE_MODULES,
     GO_V2_RUNTIME_VERSION,
     GoBinaryInfo,
     check_go_compatibility,
+    find_go_binaries,
     parse_go_version,
     semver_gte,
 )
@@ -336,3 +339,44 @@ class TestGoConstants:
 
     def test_aware_modules_has_runc_cgroups(self):
         assert "github.com/opencontainers/runc/libcontainer/cgroups" in GO_V2_AWARE_MODULES
+
+
+# ---------------------------------------------------------------------------
+# find_go_binaries — bare command resolution
+# ---------------------------------------------------------------------------
+
+
+class TestFindGoBinariesBareCommand:
+    def test_bare_command_resolved_via_path(self, tmp_path):
+        """A bare command in ENTRYPOINT found in /usr/bin should be detected."""
+        binary = tmp_path / "usr" / "bin" / "myapp"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        with patch("src.go_scan.get_go_version", return_value="go1.22.5"):
+            results = find_go_binaries(tmp_path, ["myapp"], None, debug=False)
+
+        assert len(results) == 1
+        assert results[0][2] == "go1.22.5"
+
+    def test_bare_command_not_found(self, tmp_path):
+        """A bare command not in any PATH dir should produce no results."""
+        results = find_go_binaries(tmp_path, ["nonexistent"], None, debug=False)
+        assert results == []
+
+    def test_set_dash_dash_pattern(self, tmp_path):
+        """Vault-like pattern: entrypoint does set -- myapp; exec "$@"."""
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text('#!/bin/bash\nset -- myapp server "$@"\nexec "$@"\n')
+        entrypoint.chmod(0o755)
+
+        binary = tmp_path / "bin" / "myapp"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        with patch("src.go_scan.get_go_version", return_value="go1.21.0"):
+            results = find_go_binaries(tmp_path, ["/entrypoint.sh"], None, debug=False)
+
+        assert len(results) == 1
+        assert results[0][0].endswith("myapp")
+        assert results[0][2] == "go1.21.0"

@@ -175,6 +175,19 @@ _EXEC_PATTERN = re.compile(
     r"""(?:^|\s)exec\s+["']?([^\s"'#;$]+)["']?""",
     re.MULTILINE,
 )
+_SET_PATTERN = re.compile(
+    r"""(?:^|\s)set\s+--\s+["']?([^\s"'#;$]+)["']?""",
+    re.MULTILINE,
+)
+
+_DEFAULT_PATH_DIRS = (
+    "usr/local/sbin",
+    "usr/local/bin",
+    "usr/sbin",
+    "usr/bin",
+    "sbin",
+    "bin",
+)
 
 _MAX_SOURCE_DEPTH = 5
 _MAX_SCRIPT_SIZE = 1 * 1024 * 1024  # 1 MB
@@ -218,12 +231,14 @@ def _resolve_script_in_rootfs(
     script_ref: str,
     extract_path: Path,
     relative_to: Path | None = None,
+    extra_path_dirs: tuple[str, ...] | None = None,
 ) -> Path | None:
     """Resolve a script reference to an actual file in the extracted rootfs.
 
     Handles:
     - Absolute paths: /usr/local/bin/entrypoint.sh
     - Relative paths: ./helpers.sh (resolved relative to `relative_to`)
+    - Bare commands: searched in _DEFAULT_PATH_DIRS + extra_path_dirs
     - Shell variable paths: ${SCRIPT_DIR}/helpers.sh, $DIR/helpers.sh
       → extracts the filename and tries relative resolution against
         the directory of the sourcing script
@@ -251,10 +266,31 @@ def _resolve_script_in_rootfs(
                     pass
         return None
 
+    # Bare command name (no "/" and no "$"): try relative_to first, then PATH dirs
+    if "/" not in script_ref:
+        if relative_to:
+            candidate = relative_to / script_ref
+            try:
+                resolved = candidate.resolve()
+                if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                    return resolved
+            except (OSError, ValueError):
+                pass
+        search_dirs = _DEFAULT_PATH_DIRS
+        if extra_path_dirs:
+            search_dirs = extra_path_dirs + _DEFAULT_PATH_DIRS
+        for path_dir in search_dirs:
+            candidate = extract_path / path_dir / script_ref
+            try:
+                resolved = candidate.resolve()
+                if str(resolved).startswith(str(extract_path.resolve())) and resolved.is_file():
+                    return resolved
+            except (OSError, ValueError):
+                continue
+        return None
+
     if script_ref.startswith("/"):
         candidate = extract_path / script_ref.lstrip("/")
-    elif relative_to:
-        candidate = relative_to / script_ref
     else:
         candidate = extract_path / script_ref
 
@@ -446,14 +482,14 @@ def scan_binary_strings(
 
 
 def _extract_sourced_paths(content: str) -> list[str]:
-    """Extract file paths from source/. and exec statements in a shell script."""
+    """Extract file paths from source/., exec, and set -- statements in a shell script."""
     paths: list[str] = []
     for match in _SOURCE_PATTERN.finditer(content):
         paths.append(match.group(1))
     for match in _EXEC_PATTERN.finditer(content):
-        path = match.group(1)
-        if "/" in path:
-            paths.append(path)
+        paths.append(match.group(1))
+    for match in _SET_PATTERN.finditer(content):
+        paths.append(match.group(1))
     return paths
 
 
@@ -461,6 +497,7 @@ def scan_entrypoint_scripts(
     extract_path: Path,
     entrypoint_cmd: list[str],
     debug: bool = False,
+    extra_path_dirs: tuple[str, ...] | None = None,
 ) -> tuple[list, bool, list[str]]:
     """Scan entrypoint/CMD scripts for cgroup v1 references.
 
@@ -545,6 +582,7 @@ def scan_entrypoint_scripts(
                 sourced_ref,
                 extract_path,
                 relative_to=file_path.parent,
+                extra_path_dirs=extra_path_dirs,
             )
             if resolved is None:
                 continue
@@ -589,13 +627,7 @@ def scan_entrypoint_scripts(
         print(f"      [DEBUG] Entrypoint reference: {entrypoint_ref}")
         print(f"      [DEBUG] Full entrypoint+cmd: {entrypoint_cmd}")
 
-    if "/" not in entrypoint_ref:
-        logger.debug("Skipping non-path entrypoint: %s", entrypoint_ref)
-        if debug:
-            print(f"      [DEBUG] Skipping non-path entrypoint: {entrypoint_ref}")
-        return matches, v2_aware, discovered_binaries
-
-    resolved = _resolve_script_in_rootfs(entrypoint_ref, extract_path)
+    resolved = _resolve_script_in_rootfs(entrypoint_ref, extract_path, extra_path_dirs=extra_path_dirs)
     if resolved is None:
         logger.debug("Could not resolve entrypoint in rootfs: %s", entrypoint_ref)
         if debug:
@@ -612,7 +644,7 @@ def scan_entrypoint_scripts(
 
     for arg in entrypoint_cmd[1:]:
         if "/" in arg and not arg.startswith("-"):
-            arg_resolved = _resolve_script_in_rootfs(arg, extract_path)
+            arg_resolved = _resolve_script_in_rootfs(arg, extract_path, extra_path_dirs=extra_path_dirs)
             if arg_resolved and _is_shell_script(arg_resolved) and str(arg_resolved.resolve()) not in scanned_files:
                 _scan_script(arg_resolved, arg, confidence="high", depth=0)
 
@@ -625,6 +657,7 @@ def run_deep_scan(
     entrypoint: list[str] | None = None,
     cmd: list[str] | None = None,
     debug: bool = False,
+    extra_path_dirs: tuple[str, ...] | None = None,
 ) -> tuple[list, bool]:
     """Run all deep-scan heuristics on an extracted container rootfs.
 
@@ -668,6 +701,7 @@ def run_deep_scan(
             extract_path=extract_path,
             entrypoint_cmd=combined,
             debug=debug,
+            extra_path_dirs=extra_path_dirs,
         )
         all_matches.extend(script_matches)
         if scripts_v2_aware:

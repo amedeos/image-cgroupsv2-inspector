@@ -447,6 +447,54 @@ get_mem() {
         matches, _, _ = scan_entrypoint_scripts(tmp_path, ["python", "app.py"], debug=False)
         assert matches == []
 
+    def test_bare_command_resolved_via_path(self, tmp_path):
+        """Bare command found in a standard PATH dir should be resolved."""
+        self._create_script(
+            tmp_path / "usr" / "bin" / "myapp",
+            "#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes\n",
+        )
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["myapp"], debug=False)
+        assert len(matches) >= 1
+        assert any(m.source == "myapp" for m in matches)
+
+    def test_bare_exec_in_script_resolved_via_path(self, tmp_path):
+        """exec with a bare command inside a script should be resolved."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            "#!/bin/bash\nexec myserver --flag\n",
+        )
+        self._create_script(
+            tmp_path / "usr" / "local" / "bin" / "myserver",
+            "#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes\n",
+        )
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert any(m.source.endswith("myserver") for m in matches)
+
+    def test_set_dash_dash_discovers_binary(self, tmp_path):
+        """set -- myapp in a script should discover the binary via exec chain."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            '#!/bin/bash\nset -- myapp server "$@"\nexec "$@"\n',
+        )
+        binary = tmp_path / "bin" / "myapp"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        _, _, discovered = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert any("myapp" in b for b in discovered)
+
+    def test_set_dash_dash_script_scanned(self, tmp_path):
+        """set -- pointing to a script with cgroup v1 refs should produce matches."""
+        self._create_script(
+            tmp_path / "entrypoint.sh",
+            '#!/bin/bash\nset -- myhelper "$@"\nexec "$@"\n',
+        )
+        self._create_script(
+            tmp_path / "usr" / "local" / "bin" / "myhelper",
+            "#!/bin/bash\ncat /sys/fs/cgroup/memory/memory.limit_in_bytes\n",
+        )
+        matches, _, _ = scan_entrypoint_scripts(tmp_path, ["/entrypoint.sh"], debug=False)
+        assert any(m.source.endswith("myhelper") for m in matches)
+
     def test_binary_entrypoint_skipped(self, tmp_path):
         """ELF binary should be skipped (step 4 handles this)."""
         binary = tmp_path / "usr" / "local" / "bin" / "myapp"

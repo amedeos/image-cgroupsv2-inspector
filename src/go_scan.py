@@ -185,6 +185,7 @@ def find_go_binaries(
     entrypoint: list[str] | None,
     cmd: list[str] | None,
     debug: bool = False,
+    extra_path_dirs: tuple[str, ...] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Identify Go binaries among entrypoint/cmd references.
 
@@ -216,12 +217,12 @@ def find_go_binaries(
     checked: set[str] = set()
 
     for ref in combined:
-        if "/" not in ref or ref.startswith("-"):
+        if ref.startswith("-"):
             continue
         if ref in _INTERPRETER_PATHS:
             continue
 
-        resolved = _resolve_script_in_rootfs(ref, extract_path)
+        resolved = _resolve_script_in_rootfs(ref, extract_path, extra_path_dirs=extra_path_dirs)
         if resolved is None:
             logger.debug("Could not resolve in rootfs: %s", ref)
             if debug:
@@ -255,10 +256,11 @@ def find_go_binaries(
         extract_path=extract_path,
         entrypoint_cmd=combined,
         debug=debug,
+        extra_path_dirs=extra_path_dirs,
     )
 
     for bin_ref in discovered_binaries:
-        resolved = _resolve_script_in_rootfs(bin_ref, extract_path)
+        resolved = _resolve_script_in_rootfs(bin_ref, extract_path, extra_path_dirs=extra_path_dirs)
         if resolved is None:
             continue
         real_path = str(resolved.resolve())

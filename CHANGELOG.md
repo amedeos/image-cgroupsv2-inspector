@@ -64,6 +64,14 @@ All notable changes to this project will be documented in this file.
   `source == "registry"`.
 
 ### Fixed
+- Go scanner and deep scan now detect bare commands (e.g. `exec grafana
+  server`) in entrypoint scripts by searching standard PATH directories
+  inside the extracted rootfs, including non-standard directories from
+  the image's `PATH` environment variable. Also follows `set --`
+  patterns (e.g. `set -- vault server; exec "$@"`) common in Docker
+  entrypoint scripts. Previously only absolute paths were resolved.
+- HTML report now shows the scanned binary path below each runtime
+  compatibility cell (Java, Node.js, .NET, Go).
 - CI `test` job now actually runs `pytest`. The job installed
   `pytest`/`pytest-cov` and uploaded `coverage.xml` but never invoked
   the test runner, so the suite had been silently skipped in CI. The

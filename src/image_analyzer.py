@@ -475,6 +475,46 @@ class ImageAnalyzer:
 
         return entrypoint, cmd
 
+    def _get_image_path_dirs(self, image_name: str, debug: bool = False) -> tuple[str, ...] | None:
+        """Extract non-standard PATH directories from the image's environment.
+
+        Parses the PATH variable from podman inspect and returns directories
+        not already in the default POSIX search list, stripped of leading '/'.
+
+        Returns:
+            Tuple of extra directory strings (relative to rootfs), or None.
+        """
+        import json
+
+        from .deep_scan import _DEFAULT_PATH_DIRS
+
+        exit_code, stdout, _stderr = self._run_command(
+            ["podman", "inspect", "--format", "{{json .Config.Env}}", image_name],
+            timeout=30,
+            debug=debug,
+        )
+        if exit_code != 0 or not stdout.strip():
+            return None
+
+        try:
+            env_list = json.loads(stdout.strip())
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        default_set = set(_DEFAULT_PATH_DIRS)
+        for env_var in env_list or []:
+            if env_var.startswith("PATH="):
+                dirs = env_var[5:].split(":")
+                extra = tuple(d.lstrip("/") for d in dirs if d.lstrip("/") not in default_set and d)
+                if extra:
+                    logger.debug("Extra PATH dirs from image: %s", extra)
+                    if debug:
+                        print(f"      [DEBUG] Extra PATH dirs from image: {extra}")
+                    return extra
+                return None
+
+        return None
+
     def _setup_auth(self) -> str | None:
         """
         Set up authentication for podman using pull-secret.
@@ -1402,8 +1442,10 @@ class ImageAnalyzer:
             # Extract entrypoint/cmd if needed for Go scan or deep-scan
             entrypoint = None
             cmd = None
+            extra_path_dirs = None
             if self.go_scan or self.deep_scan:
                 entrypoint, cmd = self._get_image_entrypoint(podman_image, debug=debug)
+                extra_path_dirs = self._get_image_path_dirs(podman_image, debug=debug)
 
             if self.go_scan:
                 logger.debug("Searching for Go binaries...")
@@ -1416,7 +1458,9 @@ class ImageAnalyzer:
                     get_go_module_info,
                 )
 
-                go_binary_infos = find_go_binaries(extract_path, entrypoint, cmd, debug=debug)
+                go_binary_infos = find_go_binaries(
+                    extract_path, entrypoint, cmd, debug=debug, extra_path_dirs=extra_path_dirs
+                )
 
                 for container_path, extracted_path, go_ver in go_binary_infos:
                     modules = get_go_module_info(extracted_path, debug=debug)
@@ -1461,6 +1505,7 @@ class ImageAnalyzer:
                     entrypoint=entrypoint,
                     cmd=cmd,
                     debug=debug,
+                    extra_path_dirs=extra_path_dirs,
                 )
                 result.deep_scan_matches = deep_matches
                 result.deep_scan_v2_aware_flag = v2_aware
