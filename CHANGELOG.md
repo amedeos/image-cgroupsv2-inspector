@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   chdirs, so PyInstaller release binaries no longer overwrite a user-provided
   pull-secret or miss credentials when the file exists in the launch cwd.
 
+## [2.6.0] — 2026-06-19
+
 ### Security
 - Containerfile now runs `dnf update` during build so base-image packages are
   patched to the latest errata, clearing fixable OS-package CVEs.
@@ -75,6 +77,10 @@ All notable changes to this project will be documented in this file.
   `source == "registry"`.
 
 ### Fixed
+- Rootfs containment check in `_resolve_script_in_rootfs` now uses a
+  trailing `os.sep` in the prefix comparison, closing a string-prefix
+  collision where a sibling directory sharing the rootfs name (e.g.
+  `rootfs-evil` vs `rootfs`) could bypass the boundary check.
 - Go scanner and deep scan now detect bare commands (e.g. `exec grafana
   server`) in entrypoint scripts by searching standard PATH directories
   inside the extracted rootfs, including non-standard directories from

@@ -374,6 +374,19 @@ class TestResolveScriptInRootfs:
         result = _resolve_script_in_rootfs("${DIR}/../../etc/passwd", tmp_path, relative_to=parent)
         assert result is None
 
+    def test_prefix_collision_blocked(self, tmp_path):
+        """A sibling dir sharing the rootfs name prefix must not be resolved."""
+        rootfs = tmp_path / "rootfs"
+        rootfs.mkdir()
+        evil = tmp_path / "rootfs-evil" / "usr" / "bin"
+        evil.mkdir(parents=True)
+        script = evil / "pwned.sh"
+        script.write_text("#!/bin/bash\necho pwned")
+        symlink = rootfs / "link.sh"
+        symlink.symlink_to(script)
+        result = _resolve_script_in_rootfs("/link.sh", rootfs)
+        assert result is None
+
 
 class TestScanEntrypointScripts:
     """Integration tests for scan_entrypoint_scripts()."""
