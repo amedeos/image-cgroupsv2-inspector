@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- OpenShift mode: relative `--pull-secret`, `--env-file`, and `--output-dir`
+  paths are now resolved against the invocation directory before the CLI
+  chdirs, so PyInstaller release binaries no longer overwrite a user-provided
+  pull-secret or miss credentials when the file exists in the launch cwd.
+
 ### Security
 - Containerfile now runs `dnf update` during build so base-image packages are
   patched to the latest errata, clearing fixable OS-package CVEs.

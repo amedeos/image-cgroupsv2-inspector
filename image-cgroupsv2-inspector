@@ -660,8 +660,7 @@ def _run_report_only(args, logger: logging.Logger) -> int:
         logger.error("Incompatible flags with --report-only: %s", incompatible)
         return 1
 
-    default_output_dir = "output"
-    if args.output_dir != default_output_dir:
+    if not args._output_dir_is_default:
         html_dir = Path(args.output_dir) / "html"
     else:
         html_dir = csv_path.parent / "html"
@@ -685,6 +684,29 @@ def _run_report_only(args, logger: logging.Logger) -> int:
     return 0
 
 
+def _resolve_user_path(path: str, invocation_cwd: Path) -> str:
+    """Resolve a user-supplied path against the invocation working directory.
+
+    PyInstaller one-file binaries chdir to an internal directory at startup.
+    Relative paths for pull-secret, .env, output, etc. must be resolved
+    against where the user invoked the tool, not the post-chdir location.
+    """
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return str(candidate.resolve())
+    return str((invocation_cwd / candidate).resolve())
+
+
+def _resolve_cli_paths(args: argparse.Namespace, invocation_cwd: Path) -> None:
+    """Resolve relative CLI paths before os.chdir(script_dir)."""
+    for name in ("pull_secret", "env_file", "output_dir", "log_file", "rootfs_path", "state_dir"):
+        value = getattr(args, name, None)
+        if value:
+            setattr(args, name, _resolve_user_path(value, invocation_cwd))
+    if args.report_only is not None:
+        args.report_only = _resolve_user_path(args.report_only, invocation_cwd)
+
+
 def _build_state_file_path(target: str, state_dir: str) -> str:
     """Return the full path to the state file for *target*."""
     return str(Path(state_dir) / ScanState.build_state_filename(target))
@@ -706,9 +728,13 @@ def main() -> int:
     print_banner()
 
     # Parse arguments
+    invocation_cwd = Path.cwd()
     args = parse_arguments()
+    args._pull_secret_is_default = args.pull_secret == ".pull-secret"
+    args._output_dir_is_default = args.output_dir == "output"
+    _resolve_cli_paths(args, invocation_cwd)
 
-    # Change to script directory for relative paths
+    # Change to script directory for relative paths (bundled assets, default output)
     os.chdir(script_dir)
 
     # Resolve state directory early (default = output dir)
@@ -885,7 +911,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                pull_secret_explicitly_set = not args._pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
@@ -1051,7 +1077,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                pull_secret_explicitly_set = not args._pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
