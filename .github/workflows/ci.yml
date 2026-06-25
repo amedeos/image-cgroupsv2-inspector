@@ -43,23 +43,3 @@ jobs:
             --hidden-import=src \
             image-cgroupsv2-inspector
           ./dist/image-cgroupsv2-inspector-linux-amd64 --help
-
-  binary-build-check-el8:
-    runs-on: ubuntu-latest
-    needs: lint-test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify PyInstaller build (RHEL 8 / glibc 2.28)
-        run: |
-          docker run --rm -v "$PWD:/work" -w /work registry.access.redhat.com/ubi8/ubi:8.10 bash -c "
-            set -euo pipefail
-            dnf -y install python3.12 python3.12-pip gcc python3.12-devel
-            python3.12 -m pip install --upgrade pip
-            python3.12 -m pip install -r requirements.txt pyinstaller
-            python3.12 -m PyInstaller --onefile --name image-cgroupsv2-inspector-linux-amd64-el8 \
-              --add-data 'src:src' \
-              --hidden-import=src \
-              image-cgroupsv2-inspector
-          "
-          ./dist/image-cgroupsv2-inspector-linux-amd64-el8 --help

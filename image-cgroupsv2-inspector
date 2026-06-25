@@ -249,6 +249,9 @@ The tool will save credentials to .env file after successful connection.
         "Only containers from matching namespaces are scanned. "
         "Supports glob patterns with * (e.g., '*-dev,*-staging'). "
         "Ignored when --namespace is specified. "
+        "Note: default exclusion patterns (openshift-*, kube-*) are applied before "
+        "this filter; to include namespaces that match those patterns, override them "
+        "with --exclude-namespaces. "
         "Default: include all namespaces (subject to --exclude-namespaces).",
     )
 
@@ -694,7 +697,7 @@ def _run_report_only(args, logger: logging.Logger) -> int:
         logger.error("Incompatible flags with --report-only: %s", incompatible)
         return 1
 
-    if not args._output_dir_is_default:
+    if not args.output_dir_is_default:
         html_dir = Path(args.output_dir) / "html"
     else:
         html_dir = csv_path.parent / "html"
@@ -771,8 +774,8 @@ def main() -> int:
     # Parse arguments
     invocation_cwd = Path.cwd()
     args = parse_arguments()
-    args._pull_secret_is_default = args.pull_secret == ".pull-secret"
-    args._output_dir_is_default = args.output_dir == "output"
+    args.pull_secret_is_default = args.pull_secret == ".pull-secret"
+    args.output_dir_is_default = args.output_dir == "output"
     _resolve_cli_paths(args, invocation_cwd)
 
     # Change to script directory for relative paths (bundled assets, default output)
@@ -955,7 +958,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = not args._pull_secret_is_default
+                pull_secret_explicitly_set = not args.pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
@@ -1123,7 +1126,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = not args._pull_secret_is_default
+                pull_secret_explicitly_set = not args.pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")

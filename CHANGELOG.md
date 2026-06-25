@@ -36,11 +36,6 @@ All notable changes to this project will be documented in this file.
   same layer to keep the image smaller.
 
 ### Added
-- Release: `image-cgroupsv2-inspector-linux-amd64-el8` binary built on UBI 8
-  (glibc 2.28) for RHEL 8 / Rocky 8 / AlmaLinux 8 hosts; the default
-  `linux-amd64` binary still targets newer glibc (e.g. Ubuntu 24.04).
-- CI: `binary-build-check-el8` job verifies the UBI 8 PyInstaller build on
-  every push/PR.
 - README: document the prebuilt images published on Quay.io
   (`quay.io/asalvati/image-cgroupsv2-inspector`) with a `podman pull` example.
 - CI: release workflow (`release.yml`) builds standalone binaries for
