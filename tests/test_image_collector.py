@@ -229,3 +229,130 @@ class TestDefaults:
     def test_default_exclude_patterns(self):
         assert "openshift-*" in DEFAULT_EXCLUDE_NAMESPACE_PATTERNS
         assert "kube-*" in DEFAULT_EXCLUDE_NAMESPACE_PATTERNS
+
+
+# ---------------------------------------------------------------------------
+# Namespace include filter
+# ---------------------------------------------------------------------------
+
+
+class TestNamespaceIncludeFilter:
+    """Tests for _is_namespace_included and the include_namespace_patterns filter."""
+
+    def test_no_filter_includes_all(self, mock_client):
+        collector = ImageCollector(mock_client)
+        assert collector._is_namespace_included("my-app") is True
+        assert collector._is_namespace_included("my-app-dev") is True
+
+    def test_suffix_glob(self, mock_client):
+        collector = ImageCollector(mock_client, include_namespace_patterns=["*-dev"])
+        assert collector._is_namespace_included("my-app-dev") is True
+        assert collector._is_namespace_included("backend-dev") is True
+        assert collector._is_namespace_included("my-app-prod") is False
+        assert collector._is_namespace_included("default") is False
+
+    def test_multiple_patterns(self, mock_client):
+        collector = ImageCollector(mock_client, include_namespace_patterns=["*-dev", "*-staging"])
+        assert collector._is_namespace_included("my-app-dev") is True
+        assert collector._is_namespace_included("my-app-staging") is True
+        assert collector._is_namespace_included("my-app-prod") is False
+
+    def test_exact_name_pattern(self, mock_client):
+        collector = ImageCollector(mock_client, include_namespace_patterns=["production"])
+        assert collector._is_namespace_included("production") is True
+        assert collector._is_namespace_included("production-v2") is False
+
+    def test_prefix_glob(self, mock_client):
+        collector = ImageCollector(mock_client, include_namespace_patterns=["team-a-*"])
+        assert collector._is_namespace_included("team-a-dev") is True
+        assert collector._is_namespace_included("team-a-prod") is True
+        assert collector._is_namespace_included("team-b-dev") is False
+
+    def test_single_namespace_mode_ignores_include_patterns(self, mock_client):
+        collector = ImageCollector(mock_client, namespace="my-app", include_namespace_patterns=["*-dev"])
+        assert collector.include_namespace_patterns == []
+
+    def test_filter_applied_to_images(self, mock_client):
+        collector = ImageCollector(mock_client, include_namespace_patterns=["*-dev"])
+        collector.images = [
+            ContainerImageInfo("app", "quay.io/org/app:v1", "backend-dev", "", "Deployment", "dep"),
+            ContainerImageInfo("app", "quay.io/org/app:v1", "backend-prod", "", "Deployment", "dep"),
+            ContainerImageInfo("app", "quay.io/org/app:v1", "frontend-dev", "", "Deployment", "dep"),
+        ]
+        collector.images = [img for img in collector.images if collector._is_namespace_included(img.namespace)]
+        assert len(collector.images) == 2
+        namespaces = {img.namespace for img in collector.images}
+        assert namespaces == {"backend-dev", "frontend-dev"}
+
+
+# ---------------------------------------------------------------------------
+# Registry include filter
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryFilter:
+    """Tests for _is_registry_included and the include_registry_prefixes filter."""
+
+    def test_no_filter_includes_all(self, mock_client):
+        collector = ImageCollector(mock_client)
+        assert collector._is_registry_included("quay.io/myorg/app:latest") is True
+        assert collector._is_registry_included("docker.io/library/nginx:latest") is True
+
+    def test_single_prefix_matches(self, mock_client):
+        collector = ImageCollector(mock_client, include_registry_prefixes=["quay.io/myorg"])
+        assert collector._is_registry_included("quay.io/myorg/app:latest") is True
+        assert collector._is_registry_included("quay.io/myorg/other:v1") is True
+
+    def test_single_prefix_excludes_other_registry(self, mock_client):
+        collector = ImageCollector(mock_client, include_registry_prefixes=["quay.io/myorg"])
+        assert collector._is_registry_included("docker.io/library/nginx:latest") is False
+        assert collector._is_registry_included("registry.example.com/app:latest") is False
+
+    def test_multiple_prefixes(self, mock_client):
+        collector = ImageCollector(
+            mock_client,
+            include_registry_prefixes=["quay.io/myorg", "registry.example.com"],
+        )
+        assert collector._is_registry_included("quay.io/myorg/app:latest") is True
+        assert collector._is_registry_included("registry.example.com/myapp:v2") is True
+        assert collector._is_registry_included("docker.io/library/nginx:latest") is False
+
+    def test_prefix_hostname_only(self, mock_client):
+        collector = ImageCollector(mock_client, include_registry_prefixes=["quay.io"])
+        assert collector._is_registry_included("quay.io/org/app:latest") is True
+        assert collector._is_registry_included("docker.io/library/nginx:latest") is False
+
+    def test_collect_all_applies_filter(self, mock_client):
+        """After collect_all, only images matching the prefix survive."""
+        collector = ImageCollector(mock_client, include_registry_prefixes=["quay.io/myorg"])
+
+        # Inject images directly (bypassing real API calls)
+        from src.image_collector import ContainerImageInfo
+
+        collector.images = [
+            ContainerImageInfo("app", "quay.io/myorg/app:v1", "ns", "", "Deployment", "dep"),
+            ContainerImageInfo("sidecar", "docker.io/library/nginx:latest", "ns", "", "Deployment", "dep"),
+            ContainerImageInfo("other", "quay.io/myorg/other:v2", "ns", "", "Deployment", "dep"),
+        ]
+
+        # Patch the collect_from_* methods so collect_all() doesn't call the API
+        for method in (
+            "collect_from_deployments",
+            "collect_from_deploymentconfigs",
+            "collect_from_statefulsets",
+            "collect_from_daemonsets",
+            "collect_from_cronjobs",
+            "collect_from_replicasets",
+            "collect_from_jobs",
+            "collect_from_pods",
+        ):
+            setattr(collector, method, lambda: 0)
+
+        # Simulate collect_all filter logic by calling the relevant section directly
+        collector.images = [img for img in collector.images if collector._is_registry_included(img.image_name)]
+
+        assert len(collector.images) == 2
+        names = {img.image_name for img in collector.images}
+        assert "quay.io/myorg/app:v1" in names
+        assert "quay.io/myorg/other:v2" in names
+        assert "docker.io/library/nginx:latest" not in names

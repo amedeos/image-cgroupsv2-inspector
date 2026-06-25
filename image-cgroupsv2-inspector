@@ -241,6 +241,29 @@ The tool will save credentials to .env file after successful connection.
     )
 
     parser.add_argument(
+        "--include-namespaces",
+        dest="include_namespaces",
+        type=str,
+        default="",
+        help="Comma-separated list of namespace glob patterns to include (OpenShift mode only). "
+        "Only containers from matching namespaces are scanned. "
+        "Supports glob patterns with * (e.g., '*-dev,*-staging'). "
+        "Ignored when --namespace is specified. "
+        "Default: include all namespaces (subject to --exclude-namespaces).",
+    )
+
+    parser.add_argument(
+        "--include-registries",
+        dest="include_registries",
+        type=str,
+        default="",
+        help="Comma-separated list of registry prefixes to include (OpenShift mode only). "
+        "Only images whose FQDN starts with one of the given prefixes are scanned. "
+        "Example: 'quay.io/myorg,registry.example.com'. "
+        "Default: include all registries.",
+    )
+
+    parser.add_argument(
         "--skip-disk-check",
         dest="skip_disk_check",
         action="store_true",
@@ -274,6 +297,17 @@ The tool will save credentials to .env file after successful connection.
         type=str,
         default="",
         help="Quay Application Token (OAuth token) for authentication. Required permissions: 'View all visible repositories' + 'Read User Information'",
+    )
+
+    parser.add_argument(
+        "--registry-user",
+        dest="registry_user",
+        type=str,
+        default="",
+        help="Username for Quay basic authentication. When set, the tool uses "
+        "HTTP Basic auth (username + token as password) instead of Bearer token "
+        "for the Quay API. Use this when OAuth Application Tokens are not "
+        "available (e.g., robot accounts or docker-login credentials).",
     )
 
     parser.add_argument(
@@ -660,8 +694,7 @@ def _run_report_only(args, logger: logging.Logger) -> int:
         logger.error("Incompatible flags with --report-only: %s", incompatible)
         return 1
 
-    default_output_dir = "output"
-    if args.output_dir != default_output_dir:
+    if not args._output_dir_is_default:
         html_dir = Path(args.output_dir) / "html"
     else:
         html_dir = csv_path.parent / "html"
@@ -685,6 +718,36 @@ def _run_report_only(args, logger: logging.Logger) -> int:
     return 0
 
 
+def _resolve_user_path(path: str, invocation_cwd: Path) -> str:
+    """Resolve a user-supplied path against the invocation working directory.
+
+    PyInstaller one-file binaries chdir to an internal directory at startup.
+    Relative paths for pull-secret, .env, output, etc. must be resolved
+    against where the user invoked the tool, not the post-chdir location.
+    """
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return str(candidate.resolve())
+    return str((invocation_cwd / candidate).resolve())
+
+
+def _resolve_cli_paths(args: argparse.Namespace, invocation_cwd: Path) -> None:
+    """Resolve relative CLI paths before os.chdir(script_dir)."""
+    for name in ("pull_secret", "env_file", "output_dir", "log_file", "rootfs_path", "state_dir"):
+        value = getattr(args, name, None)
+        if value:
+            setattr(args, name, _resolve_user_path(value, invocation_cwd))
+    if args.report_only is not None:
+        args.report_only = _resolve_user_path(args.report_only, invocation_cwd)
+
+
+def _normalize_registry_url(url: str) -> str:
+    """Prepend https:// when the user omits the scheme."""
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    return url.rstrip("/")
+
+
 def _build_state_file_path(target: str, state_dir: str) -> str:
     """Return the full path to the state file for *target*."""
     return str(Path(state_dir) / ScanState.build_state_filename(target))
@@ -706,9 +769,13 @@ def main() -> int:
     print_banner()
 
     # Parse arguments
+    invocation_cwd = Path.cwd()
     args = parse_arguments()
+    args._pull_secret_is_default = args.pull_secret == ".pull-secret"
+    args._output_dir_is_default = args.output_dir == "output"
+    _resolve_cli_paths(args, invocation_cwd)
 
-    # Change to script directory for relative paths
+    # Change to script directory for relative paths (bundled assets, default output)
     os.chdir(script_dir)
 
     # Resolve state directory early (default = output dir)
@@ -769,6 +836,8 @@ def main() -> int:
         args.registry_url = os.environ.get("QUAY_REGISTRY_URL", "")
     if not args.registry_token:
         args.registry_token = os.environ.get("QUAY_REGISTRY_TOKEN", "")
+    if not args.registry_user:
+        args.registry_user = os.environ.get("QUAY_REGISTRY_USER", "")
     if not args.registry_org:
         args.registry_org = os.environ.get("QUAY_REGISTRY_ORG", "")
 
@@ -821,6 +890,7 @@ def main() -> int:
 
         from urllib.parse import urlparse
 
+        args.jfrog_url = _normalize_registry_url(args.jfrog_url)
         parsed = urlparse(args.jfrog_url)
         registry_host = parsed.hostname
         if parsed.port:
@@ -885,7 +955,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                pull_secret_explicitly_set = not args._pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
@@ -987,6 +1057,7 @@ def main() -> int:
 
         from urllib.parse import urlparse
 
+        args.registry_url = _normalize_registry_url(args.registry_url)
         parsed = urlparse(args.registry_url)
         registry_host = parsed.hostname
         if parsed.port:
@@ -1004,6 +1075,7 @@ def main() -> int:
                 base_url=args.registry_url,
                 token=args.registry_token,
                 verify_ssl=args.verify_ssl,
+                username=args.registry_user,
             )
             quay_client.test_connection()
             quay_client.get_organization(args.registry_org)
@@ -1051,7 +1123,7 @@ def main() -> int:
                     logger.error("--analyze requires --rootfs-path")
                     return 1
 
-                pull_secret_explicitly_set = args.pull_secret != ".pull-secret"
+                pull_secret_explicitly_set = not args._pull_secret_is_default
                 if pull_secret_explicitly_set and Path(args.pull_secret).exists():
                     pull_secret_path = args.pull_secret
                     print(f"🔑 Using pull-secret: {pull_secret_path}")
@@ -1060,6 +1132,7 @@ def main() -> int:
                     pull_secret_path = generate_registry_auth_json(
                         registry_host=registry_host,
                         token=args.registry_token,
+                        username=args.registry_user or "$oauthtoken",
                     )
                     print(f"🔑 Generated registry auth file: {pull_secret_path}")
                     logger.info("Generated registry auth file: %s", pull_secret_path)
@@ -1183,17 +1256,37 @@ def main() -> int:
     skipped: list[str] = []
 
     try:
+        include_registry_prefixes = None
+        if args.include_registries:
+            include_registry_prefixes = [p.strip() for p in args.include_registries.split(",") if p.strip()]
+            print(f"\n📋 Registry filter (include): {', '.join(include_registry_prefixes)}")
+            logger.info("Registry include prefixes: %s", ", ".join(include_registry_prefixes))
+
+        include_namespace_patterns = None
+        if args.include_namespaces:
+            include_namespace_patterns = [p.strip() for p in args.include_namespaces.split(",") if p.strip()]
+            print(f"\n📋 Namespace include patterns: {', '.join(include_namespace_patterns)}")
+            logger.info("Namespace include patterns: %s", ", ".join(include_namespace_patterns))
+
         if args.namespace:
+            if include_namespace_patterns:
+                print("  ⚠ --include-namespaces is ignored when --namespace is specified.")
+                logger.warning("--include-namespaces ignored because --namespace is set")
             print(f"\n📋 Inspecting single namespace: {args.namespace}")
             logger.info("Inspecting single namespace: %s", args.namespace)
-            collector = ImageCollector(client, namespace=args.namespace)
+            collector = ImageCollector(client, namespace=args.namespace, include_registry_prefixes=include_registry_prefixes)
         else:
             exclude_patterns = None
             if args.exclude_namespaces:
                 exclude_patterns = [p.strip() for p in args.exclude_namespaces.split(",") if p.strip()]
                 print(f"\n📋 Namespace exclusion patterns: {', '.join(exclude_patterns)}")
                 logger.info("Namespace exclusion patterns: %s", ", ".join(exclude_patterns))
-            collector = ImageCollector(client, exclude_namespace_patterns=exclude_patterns)
+            collector = ImageCollector(
+                client,
+                exclude_namespace_patterns=exclude_patterns,
+                include_registry_prefixes=include_registry_prefixes,
+                include_namespace_patterns=include_namespace_patterns,
+            )
 
         logger.info("Collecting container images from cluster...")
         total = collector.collect_all()

@@ -42,13 +42,15 @@ class QuayClient:
         base_url: Quay instance URL (e.g., "https://quay.example.com").
         token: OAuth access token or robot account token.
         verify_ssl: Whether to verify SSL certificates. Defaults to True.
+        username: When set, use HTTP Basic auth (username + token as
+            password) instead of Bearer token auth.
     """
 
     DEFAULT_TIMEOUT = 30
     MAX_RETRIES = 3
     RETRY_BACKOFF = 1
 
-    def __init__(self, base_url: str, token: str, verify_ssl: bool = True) -> None:
+    def __init__(self, base_url: str, token: str, verify_ssl: bool = True, username: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.api_base = f"{self.base_url}/api/v1"
         self.verify_ssl = verify_ssl
@@ -57,12 +59,16 @@ class QuayClient:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-            }
-        )
+        if username:
+            self.session.auth = (username, token)
+            self.session.headers.update({"Accept": "application/json"})
+        else:
+            self.session.headers.update(
+                {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                }
+            )
         self.session.verify = verify_ssl
 
     def _request(self, method: str, path: str, **kwargs) -> dict:

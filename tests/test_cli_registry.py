@@ -449,6 +449,7 @@ class TestRegistryModePullSecret:
         mock_gen_auth.assert_called_once_with(
             registry_host="quay.example.com",
             token="tok123",
+            username="$oauthtoken",
         )
 
     def test_generates_auth_when_no_pull_secret_file(self):

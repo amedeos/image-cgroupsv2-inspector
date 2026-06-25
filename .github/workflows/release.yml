@@ -22,6 +22,9 @@ jobs:
   # ───────────────────────────────────────────────────────────────────
   # Binary builds — native runners for each arch (no emulation overhead)
   #
+  # linux-amd64-el8 is built inside UBI 8 (glibc 2.28) so it runs on RHEL 8;
+  # the default linux-amd64 artifact from ubuntu-latest needs GLIBC_2.38+.
+  #
   # NOTE: ARM64 binaries and containers are provided for ARM-native hosts
   # only. The tool does not support cross-architecture scanning: podman
   # pull fetches the host's native arch, and runtime version detection
@@ -75,6 +78,32 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact_name }}
+
+  # glibc 2.28 (RHEL 8 / UBI 8) — ubuntu-latest binaries need GLIBC_2.38+
+  build-binary-el8:
+    needs: lint-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build binary with PyInstaller (UBI 8)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work registry.access.redhat.com/ubi8/ubi:8.10 bash -c "
+            set -euo pipefail
+            dnf -y install python3.12 python3.12-pip gcc python3.12-devel
+            python3.12 -m pip install --upgrade pip
+            python3.12 -m pip install -r requirements.txt pyinstaller
+            python3.12 -m PyInstaller --onefile --name image-cgroupsv2-inspector-linux-amd64-el8 \
+              --add-data 'src:src' \
+              --hidden-import=src \
+              image-cgroupsv2-inspector
+          "
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-cgroupsv2-inspector-linux-amd64-el8
+          path: dist/image-cgroupsv2-inspector-linux-amd64-el8
 
   # ───────────────────────────────────────────────────────────────────
   # Container images — native build per arch, then manifest merge
@@ -184,7 +213,7 @@ jobs:
   # GitHub Release with all binaries attached
   # ───────────────────────────────────────────────────────────────────
   create-release:
-    needs: [build-binaries, container-manifest]
+    needs: [build-binaries, build-binary-el8, container-manifest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

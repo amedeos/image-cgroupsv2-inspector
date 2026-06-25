@@ -104,6 +104,8 @@ class ImageCollector:
         openshift_client: OpenShiftClient,
         exclude_namespace_patterns: list[str] | None = None,
         namespace: str | None = None,
+        include_registry_prefixes: list[str] | None = None,
+        include_namespace_patterns: list[str] | None = None,
     ):
         """
         Initialize the image collector.
@@ -115,23 +117,47 @@ class ImageCollector:
                                        Default: ['openshift-*', 'kube-*']
                                        Ignored when namespace is specified.
             namespace: If specified, only collect from this namespace.
-                      When set, exclude_namespace_patterns is ignored.
+                      When set, exclude_namespace_patterns and include_namespace_patterns
+                      are ignored.
+            include_registry_prefixes: If set, only retain images whose FQDN starts with
+                                       one of the given prefixes (e.g. ['quay.io/myorg']).
+                                       None means no registry filter (keep all).
+            include_namespace_patterns: If set, only retain images from namespaces that
+                                        match at least one glob pattern (e.g. ['*-dev']).
+                                        None means no namespace inclusion filter (keep all).
+                                        Ignored when namespace is specified.
         """
         self.client = openshift_client
         self.images: list[ContainerImageInfo] = []
         self.namespace = namespace  # Single namespace mode if set
+        self.include_registry_prefixes = include_registry_prefixes
 
         # Set up namespace exclusion patterns (only used when namespace is None)
         if namespace:
-            # Single namespace mode - no exclusion patterns needed
+            # Single namespace mode - no exclusion or inclusion patterns needed
             self.exclude_patterns = []
+            self.include_namespace_patterns: list[str] = []
         elif exclude_namespace_patterns is None:
             self.exclude_patterns = DEFAULT_EXCLUDE_NAMESPACE_PATTERNS.copy()
+            self.include_namespace_patterns = list(include_namespace_patterns) if include_namespace_patterns else []
         else:
             self.exclude_patterns = exclude_namespace_patterns
+            self.include_namespace_patterns = list(include_namespace_patterns) if include_namespace_patterns else []
 
         # Cache of excluded namespaces (populated during collection)
         self._excluded_namespaces_cache: set[str] = set()
+
+    def _is_registry_included(self, image_name: str) -> bool:
+        """Return True if image_name matches any of the include_registry_prefixes (or no filter is set)."""
+        if not self.include_registry_prefixes:
+            return True
+        return any(image_name.startswith(prefix) for prefix in self.include_registry_prefixes)
+
+    def _is_namespace_included(self, namespace: str) -> bool:
+        """Return True if namespace matches any include_namespace_patterns glob (or no filter is set)."""
+        if not self.include_namespace_patterns:
+            return True
+        return any(fnmatch.fnmatch(namespace, pattern) for pattern in self.include_namespace_patterns)
 
     def _is_namespace_excluded(self, namespace: str) -> bool:
         """
@@ -840,6 +866,9 @@ class ImageCollector:
         if self.exclude_patterns:
             logger.debug("Excluding namespaces matching: %s", ", ".join(self.exclude_patterns))
             print(f"  (Excluding namespaces matching: {', '.join(self.exclude_patterns)})")
+        if self.include_namespace_patterns:
+            logger.debug("Including only namespaces matching: %s", ", ".join(self.include_namespace_patterns))
+            print(f"  (Including only namespaces matching: {', '.join(self.include_namespace_patterns)})")
         self.images = []  # Reset
         self._excluded_namespaces_cache.clear()  # Clear cache for fresh collection
 
@@ -861,6 +890,39 @@ class ImageCollector:
 
         logger.debug("Total containers found: %d", total)
         print(f"\n✓ Total containers found: {total}")
+
+        if self.include_namespace_patterns:
+            before = len(self.images)
+            self.images = [img for img in self.images if self._is_namespace_included(img.namespace)]
+            kept = len(self.images)
+            dropped = before - kept
+            logger.debug(
+                "Namespace include filter: kept %d / %d containers (patterns: %s)",
+                kept,
+                before,
+                ", ".join(self.include_namespace_patterns),
+            )
+            print(
+                f"  (Namespace include filter: kept {kept} / {before} containers matching "
+                f"{', '.join(self.include_namespace_patterns)}" + (f"; dropped {dropped}" if dropped else "") + ")"
+            )
+
+        if self.include_registry_prefixes:
+            before = len(self.images)
+            self.images = [img for img in self.images if self._is_registry_included(img.image_name)]
+            kept = len(self.images)
+            dropped = before - kept
+            logger.debug(
+                "Registry filter: kept %d / %d containers (prefixes: %s)",
+                kept,
+                before,
+                ", ".join(self.include_registry_prefixes),
+            )
+            print(
+                f"  (Registry filter: kept {kept} / {before} containers matching "
+                f"{', '.join(self.include_registry_prefixes)}" + (f"; dropped {dropped}" if dropped else "") + ")"
+            )
+
         if self._excluded_namespaces_cache:
             logger.debug(
                 "Excluded %d namespaces: %s%s",
