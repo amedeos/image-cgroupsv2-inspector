@@ -978,6 +978,86 @@ When using `--rootfs-path`, the tool:
 
 This setup ensures the user can create, modify, and delete files in the rootfs directory.
 
+## Podman Storage Disk Space
+
+`--rootfs-path` only covers the exported filesystem used for analysis. Separately, **rootless podman** stores pulled image layers under its own storage directory. By default that is:
+
+```text
+~/.local/share/containers/storage
+```
+
+On hosts with a small home filesystem (common on bastions), repeated `podman pull` during `--analyze` can fill `$HOME` even when `--rootfs-path` points elsewhere.
+
+### Check how much space podman is using
+
+```bash
+du -sh ~/.local/share/containers/storage 2>/dev/null
+df -h "$HOME"
+podman info --format 'GraphRoot={{.Store.GraphRoot}} RunRoot={{.Store.RunRoot}}'
+```
+
+### Reclaim space used by image pulls
+
+When home is already full, a full reset of rootless storage is the reliable cleanup:
+
+```bash
+# Remove all local images, containers, and storage metadata
+podman system reset -f
+
+# Verify
+du -sh ~/.local/share/containers/storage 2>/dev/null
+df -h "$HOME"
+```
+
+If space remains after the reset, remove the leftover directory:
+
+```bash
+rm -rf ~/.local/share/containers
+```
+
+> **Note:** `podman system reset -f` deletes local images and containers for the current user. Re-pulls will be required on the next analysis run. Prefer `--resume` afterward so already-analyzed images are not reprocessed.
+
+### Move podman storage out of home
+
+To avoid saturating `$HOME` again, point `graphroot` and `runroot` at a filesystem with more free space (for example `/var/tmp` or a dedicated data volume):
+
+```bash
+# Pick a destination with enough free space
+mkdir -p /var/tmp/"$USER"/podman-storage
+mkdir -p /var/tmp/"$USER"/podman-run
+
+mkdir -p ~/.config/containers
+cat > ~/.config/containers/storage.conf <<EOF
+[storage]
+driver = "overlay"
+graphroot = "/var/tmp/$USER/podman-storage"
+runroot = "/var/tmp/$USER/podman-run"
+EOF
+
+# Confirm the new locations
+podman info --format 'GraphRoot={{.Store.GraphRoot}} RunRoot={{.Store.RunRoot}}'
+```
+
+After changing `storage.conf`, images already stored under the old path are no longer visible to podman: reclaim that space with the reset steps above (if you have not already), then re-pull as needed.
+
+> **Tip:** Prefer a persistent mount when available. Paths under `/tmp` or `/var/tmp` may be cleared on reboot depending on host policy.
+
+### Related pull failure: insufficient subordinate UIDs/GIDs
+
+If pulls fail with `potentially insufficient UIDs or GIDs available in user namespace`, the user account is missing (or has too small) subordinate ID ranges. An administrator must configure them, then migrate storage:
+
+```bash
+# Inspect current mapping
+grep "$USER" /etc/subuid /etc/subgid
+
+# Admin step (example range)
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
+
+# Apply and re-test
+podman system migrate
+podman pull docker.io/library/alpine:latest
+```
+
 ## Test Resources
 
 ### OpenShift Cluster

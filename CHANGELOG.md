@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- README: "Podman Storage Disk Space" section covering how to reclaim
+  rootless storage that filled `$HOME`, relocate `graphroot`/`runroot`
+  outside home, and fix insufficient subordinate UID/GID ranges.
 - HTML report: "By Namespace", "By Registry org", and "By Registry repo"
   summary tables in the Summary section, showing overall-status counts per
   group (same layout as "By runtime"). First column is clickable to filter
