@@ -189,6 +189,23 @@ def _compute_overall_status(runtime_data: dict, deep_scan_data: dict) -> str:
     return "not_applicable"
 
 
+_STATUS_BUCKETS = ("compatible", "incompatible", "needs_review", "not_applicable")
+
+
+def _build_by_group(images: list[dict], values_key: str) -> dict[str, dict[str, int]]:
+    """Aggregate overall_status counts grouped by a pipe-separated image field."""
+    result: dict[str, dict[str, int]] = {}
+    for img in images:
+        raw = img.get(values_key, "")
+        if not raw:
+            continue
+        for val in raw.split("|"):
+            if val not in result:
+                result[val] = {s: 0 for s in _STATUS_BUCKETS}
+            result[val][img["overall_status"]] += 1
+    return dict(sorted(result.items()))
+
+
 def _compute_source_mode(sources: set[str]) -> str:
     if not sources:
         return "unknown"
@@ -232,6 +249,7 @@ def build_report_context(
             sources.add(row.get("source", ""))
 
     images = []
+
     for img_name in sorted(image_rows):
         img_group = image_rows[img_name]
         runtime_data = {rt: _runtime_fields(img_group, rt) for rt in _RUNTIMES}
@@ -239,11 +257,18 @@ def build_report_context(
         overall_status = _compute_overall_status(runtime_data, deep_scan_data)
         consumers = [_build_consumer(r) for r in img_group]
 
+        ns_vals = sorted({c["namespace"] for c in consumers if c["namespace"]})
+        org_vals = sorted({c["registry_org"] for c in consumers if c["registry_org"]})
+        repo_vals = sorted({c["registry_repo"] for c in consumers if c["registry_repo"]})
+
         entry = {
             "image_name": img_name,
             "image_id": img_group[0].get("image_id", ""),
             "used_by_count": len(consumers),
             "consumers": consumers,
+            "namespace_values": "|".join(ns_vals),
+            "registry_org_values": "|".join(org_vals),
+            "registry_repo_values": "|".join(repo_vals),
             **runtime_data,
             "deep_scan": deep_scan_data,
             "overall_status": overall_status,
@@ -301,6 +326,9 @@ def build_report_context(
         "with_errors": total_error_rows,
         "by_overall_status": by_overall,
         "by_compatibility": by_compat,
+        "by_namespace": _build_by_group(images, "namespace_values"),
+        "by_registry_org": _build_by_group(images, "registry_org_values"),
+        "by_registry_repo": _build_by_group(images, "registry_repo_values"),
         "deep_scan": {
             "enabled": ds_enabled,
             "matches": len(ds_matches),

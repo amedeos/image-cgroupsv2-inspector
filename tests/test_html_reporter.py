@@ -168,7 +168,7 @@ def test_render_html_empty_csv(tmp_path: Path):
     html = render_html_report(ctx)
 
     assert "No errors." in html
-    assert "Images (0)" in html
+    assert 'id="images-count">0</span>' in html
 
 
 def test_build_context_not_applicable_for_runtimeless_image():
@@ -297,9 +297,107 @@ def test_render_html_compat_cell_empty_class_when_zero():
 
 def test_render_html_runtime_filter_js_present():
     html = _render_fixture_html()
-    assert "reportFilters.set(" in html
     assert "RUNTIME_COLS" in html
-    assert "STATE_REGEX" in html
+    assert "STATE_TO_STATUS" in html
+    assert "runtime-name-cell" in html
+
+
+# ---------------------------------------------------------------------------
+# Advanced Filters tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_by_group_tables_present():
+    ctx = _ctx()
+    s = ctx["summary"]
+    assert "by_namespace" in s
+    assert "by_registry_org" in s
+    assert "by_registry_repo" in s
+
+    assert sorted(s["by_namespace"].keys()) == ["dev", "prod"]
+    assert s["by_registry_org"] == {
+        "myorg": {"compatible": 3, "incompatible": 3, "needs_review": 2, "not_applicable": 1},
+    }
+    assert "java-app" in s["by_registry_repo"]
+    assert "nginx-base" in s["by_registry_repo"]
+
+    for counts in s["by_namespace"].values():
+        assert set(counts.keys()) == {"compatible", "incompatible", "needs_review", "not_applicable"}
+
+
+def test_build_context_per_image_filter_values():
+    ctx = _ctx()
+    java_old = next(img for img in ctx["images"] if img["image_name"] == "registry.example/myorg/java-old:v1")
+    assert java_old["namespace_values"] == "prod"
+    assert java_old["registry_org_values"] == "myorg"
+    assert java_old["registry_repo_values"] == "java-old"
+
+    dotnet = next(img for img in ctx["images"] if img["image_name"] == "registry.example/myorg/dotnet:v1")
+    assert dotnet["namespace_values"] == "dev"
+    assert dotnet["registry_org_values"] == ""
+    assert dotnet["registry_repo_values"] == ""
+
+    go_modern = next(img for img in ctx["images"] if img["image_name"] == "registry.example/myorg/go-modern:v1")
+    assert go_modern["namespace_values"] == ""
+    assert go_modern["registry_org_values"] == "myorg"
+    assert go_modern["registry_repo_values"] == "go-modern"
+
+
+def test_build_context_by_group_empty_csv(tmp_path: Path):
+    empty_csv = tmp_path / "empty.csv"
+    empty_csv.write_text(CSV_HEADER)
+    ctx = build_report_context(csv_path=empty_csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    s = ctx["summary"]
+    assert s["by_namespace"] == {}
+    assert s["by_registry_org"] == {}
+    assert s["by_registry_repo"] == {}
+
+
+def test_render_html_has_group_summary_tables():
+    html = _render_fixture_html()
+    assert "By Namespace" in html
+    assert "By Registry org" in html
+    assert "By Registry repo" in html
+    assert "group-summary-wrapper" in html
+
+
+def test_render_html_group_table_filterable_cells():
+    html = _render_fixture_html()
+    assert 'data-filter-key="namespace"' in html
+    assert 'data-filter-key="registry_org"' in html
+    assert 'data-filter-key="registry_repo"' in html
+    assert "filterable-cell" in html
+
+
+def test_render_html_group_filter_js_present():
+    html = _render_fixture_html()
+    assert "ADVANCED_FILTER_COLS" in html
+    assert "ADVANCED_FILTER_LABELS" in html
+    assert "escapeRegex" in html
+    assert "applyAdvancedFilter" in html
+
+
+def test_render_html_hidden_columns_present():
+    html = _render_fixture_html()
+    assert "<th>Namespaces</th>" in html
+    assert "<th>Registry orgs</th>" in html
+    assert "<th>Registry repos</th>" in html
+    assert "visible: false, searchable: true, targets: [8, 9, 10]" in html
+
+
+def test_render_html_no_group_tables_when_empty(tmp_path: Path):
+    """No group summary tables when CSV has no namespace/org/repo data."""
+    csv = tmp_path / "no_af.csv"
+    csv.write_text(
+        CSV_HEADER
+        + "openshift,c,,Deployment,d,,,img:v1,sha256:x,"
+        + "None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,\n"
+    )
+    ctx = build_report_context(csv_path=csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    html = render_html_report(ctx)
+    assert "By Namespace" not in html
+    assert "By Registry org" not in html
+    assert "By Registry repo" not in html
 
 
 def test_generate_html_report_writes_file(tmp_path: Path):

@@ -54,12 +54,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "dev",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "compatible",
+      "registry_org_values": "",
+      "registry_repo_values": "",
       "used_by_count": 1
     },
     {
@@ -103,12 +106,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "incompatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "ds-v1only",
       "used_by_count": 1
     },
     {
@@ -153,12 +159,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "compatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "ds-v2aware",
       "used_by_count": 1
     },
     {
@@ -198,12 +207,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "compatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "go-modern",
       "used_by_count": 1
     },
     {
@@ -243,12 +255,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "incompatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "go-old",
       "used_by_count": 1
     },
     {
@@ -288,12 +303,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "needs_review",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "go-review",
       "used_by_count": 1
     },
     {
@@ -333,12 +351,15 @@
         "compatible": "Yes",
         "version": "17.0.18"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "compatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "java-app",
       "used_by_count": 1
     },
     {
@@ -396,12 +417,15 @@
         "compatible": "No",
         "version": "1.8.0_342"
       },
+      "namespace_values": "prod",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "incompatible",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "java-old",
       "used_by_count": 3
     },
     {
@@ -441,12 +465,15 @@
         "compatible": "Unknown",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "needs_review",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "java-unknown",
       "used_by_count": 1
     },
     {
@@ -486,12 +513,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "",
       "node": {
         "binary": "None",
         "compatible": "N/A",
         "version": "None"
       },
       "overall_status": "not_applicable",
+      "registry_org_values": "myorg",
+      "registry_repo_values": "nginx-base",
       "used_by_count": 1
     },
     {
@@ -531,12 +561,15 @@
         "compatible": "N/A",
         "version": "None"
       },
+      "namespace_values": "dev",
       "node": {
         "binary": "/usr/bin/node",
         "compatible": "Yes",
         "version": "v20.10.0"
       },
       "overall_status": "compatible",
+      "registry_org_values": "",
+      "registry_repo_values": "",
       "used_by_count": 1
     }
   ],
@@ -574,11 +607,89 @@
         "yes": 1
       }
     },
+    "by_namespace": {
+      "dev": {
+        "compatible": 2,
+        "incompatible": 0,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "prod": {
+        "compatible": 0,
+        "incompatible": 1,
+        "needs_review": 0,
+        "not_applicable": 0
+      }
+    },
     "by_overall_status": {
       "compatible": 5,
       "incompatible": 3,
       "needs_review": 2,
       "not_applicable": 1
+    },
+    "by_registry_org": {
+      "myorg": {
+        "compatible": 3,
+        "incompatible": 3,
+        "needs_review": 2,
+        "not_applicable": 1
+      }
+    },
+    "by_registry_repo": {
+      "ds-v1only": {
+        "compatible": 0,
+        "incompatible": 1,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "ds-v2aware": {
+        "compatible": 1,
+        "incompatible": 0,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "go-modern": {
+        "compatible": 1,
+        "incompatible": 0,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "go-old": {
+        "compatible": 0,
+        "incompatible": 1,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "go-review": {
+        "compatible": 0,
+        "incompatible": 0,
+        "needs_review": 1,
+        "not_applicable": 0
+      },
+      "java-app": {
+        "compatible": 1,
+        "incompatible": 0,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "java-old": {
+        "compatible": 0,
+        "incompatible": 1,
+        "needs_review": 0,
+        "not_applicable": 0
+      },
+      "java-unknown": {
+        "compatible": 0,
+        "incompatible": 0,
+        "needs_review": 1,
+        "not_applicable": 0
+      },
+      "nginx-base": {
+        "compatible": 0,
+        "incompatible": 0,
+        "needs_review": 0,
+        "not_applicable": 1
+      }
     },
     "deep_scan": {
       "by_confidence": {

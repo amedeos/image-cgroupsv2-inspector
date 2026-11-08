@@ -29,6 +29,8 @@ td.used-by-cell:hover { background: #f0f0f0; }
 .consumers-table { margin: 10px 0; border-collapse: collapse; width: 100%; }
 .consumers-table th, .consumers-table td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; }
 .consumers-table th { background: #f8f8f8; }
+.consumers-table td.filterable-cell { cursor: pointer; color: #0366d6; }
+.consumers-table td.filterable-cell:hover { text-decoration: underline; background: #f0f7ff; }
 section { margin: 30px 0; }
 
 /* --- Summary interactive layout --- */
@@ -77,6 +79,24 @@ section { margin: 30px 0; }
 .compat-summary td.compat-cell:focus { outline: 2px solid #0366d6; outline-offset: -2px; }
 .compat-summary td.compat-cell.empty { cursor: default; color: #bbb; }
 .compat-summary td.compat-cell.empty:hover { background: transparent; }
+
+/* --- Group summary tables (scrollable, compact columns) --- */
+.group-summary-wrapper { max-height: 320px; overflow-y: auto; margin: 10px 0; display: inline-block; }
+.group-summary-wrapper table { width: auto; }
+.group-summary-wrapper th, .group-summary-wrapper td { white-space: nowrap; }
+.group-summary-wrapper thead th { position: sticky; top: 0; background: #fff; z-index: 1; box-shadow: 0 1px 0 #ddd; }
+.compat-summary td.filterable-cell { cursor: pointer; color: #0366d6; }
+.compat-summary td.filterable-cell:hover { text-decoration: underline; background: #f0f7ff; }
+.group-status-cell { cursor: pointer; user-select: none; transition: background 0.15s; }
+.group-status-cell:hover { background: #e7f3ff; }
+.group-status-cell:focus { outline: 2px solid #0366d6; outline-offset: -2px; }
+.group-status-cell.empty { cursor: default; color: #bbb; }
+.group-status-cell.empty:hover { background: transparent; }
+.deep-scan-filter { cursor: pointer; color: #0366d6; font-weight: bold; }
+.deep-scan-filter:hover { text-decoration: underline; }
+.deep-scan-filter:focus { outline: 2px solid #0366d6; outline-offset: 1px; }
+.deep-scan-filter.empty { cursor: default; color: #bbb; font-weight: normal; }
+.deep-scan-filter.empty:hover { text-decoration: none; }
 </style>
 </head>
 <body>
@@ -123,46 +143,83 @@ section { margin: 30px 0; }
       {% endif %}
       {% endmacro %}
       <table class="compat-summary">
-        <thead><tr><th>Runtime</th><th>Yes</th><th>No</th><th>Unknown / Needs review</th><th>N/A</th></tr></thead>
+        <thead><tr><th>Runtime</th><th>Compatible</th><th>Incompatible</th><th>Needs review</th></tr></thead>
         <tbody>
           <tr>
-            <td>Java</td>
+            <td class="filterable-cell runtime-name-cell" data-runtime="java" tabindex="0" role="button">Java</td>
             {{ compat_cell('java', 'yes', summary.by_compatibility.java.yes) }}
             {{ compat_cell('java', 'no', summary.by_compatibility.java.no) }}
             {{ compat_cell('java', 'unknown', summary.by_compatibility.java.unknown) }}
-            {{ compat_cell('java', 'na', summary.by_compatibility.java.na) }}
           </tr>
           <tr>
-            <td>Node.js</td>
+            <td class="filterable-cell runtime-name-cell" data-runtime="node" tabindex="0" role="button">Node.js</td>
             {{ compat_cell('node', 'yes', summary.by_compatibility.node.yes) }}
             {{ compat_cell('node', 'no', summary.by_compatibility.node.no) }}
             {{ compat_cell('node', 'unknown', summary.by_compatibility.node.unknown) }}
-            {{ compat_cell('node', 'na', summary.by_compatibility.node.na) }}
           </tr>
           <tr>
-            <td>.NET</td>
+            <td class="filterable-cell runtime-name-cell" data-runtime="dotnet" tabindex="0" role="button">.NET</td>
             {{ compat_cell('dotnet', 'yes', summary.by_compatibility.dotnet.yes) }}
             {{ compat_cell('dotnet', 'no', summary.by_compatibility.dotnet.no) }}
             {{ compat_cell('dotnet', 'unknown', summary.by_compatibility.dotnet.unknown) }}
-            {{ compat_cell('dotnet', 'na', summary.by_compatibility.dotnet.na) }}
           </tr>
           <tr>
-            <td>Go</td>
+            <td class="filterable-cell runtime-name-cell" data-runtime="go" tabindex="0" role="button">Go</td>
             {{ compat_cell('go', 'yes', summary.by_compatibility.go.yes) }}
             {{ compat_cell('go', 'no', summary.by_compatibility.go.no) }}
             {{ compat_cell('go', 'needs_review', summary.by_compatibility.go.needs_review) }}
-            {{ compat_cell('go', 'none', summary.by_compatibility.go.none) }}
           </tr>
         </tbody>
       </table>
 
+      {% macro group_summary_table(title, data, filter_key) %}
+      {% if data %}
+      <h3>{{ title }}</h3>
+      <div class="group-summary-wrapper">
+        <table class="compat-summary">
+          <thead><tr><th>{{ title }}</th><th>Compatible</th><th>Incompatible</th><th>Needs review</th><th>N/A</th></tr></thead>
+          <tbody>
+          {% for name, counts in data.items() %}
+            <tr>
+              <td class="filterable-cell" data-filter-key="{{ filter_key }}" data-filter-value="{{ name }}">{{ name }}</td>
+              {% for status, count in [("compatible", counts.compatible), ("incompatible", counts.incompatible), ("needs_review", counts.needs_review), ("not_applicable", counts.not_applicable)] %}
+              {% if count > 0 %}
+              <td class="group-status-cell" data-filter-key="{{ filter_key }}" data-filter-value="{{ name }}" data-status="{{ status }}"
+                  tabindex="0" role="button">{{ count }}</td>
+              {% else %}
+              <td class="group-status-cell empty">0</td>
+              {% endif %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      {% endmacro %}
+
+      {{ group_summary_table('By Namespace', summary.by_namespace, 'namespace') }}
+      {{ group_summary_table('By Registry org', summary.by_registry_org, 'registry_org') }}
+      {{ group_summary_table('By Registry repo', summary.by_registry_repo, 'registry_repo') }}
+
       {% if summary.deep_scan.enabled %}
       <h3>Deep scan</h3>
+      {% macro ds_val(count, regex, label) %}
+      {% if count > 0 %}
+      <span class="deep-scan-filter" data-ds-regex="{{ regex }}" data-ds-label="{{ label }}" role="button" tabindex="0">{{ count }}</span>
+      {% else %}
+      <span class="deep-scan-filter empty">0</span>
+      {% endif %}
+      {% endmacro %}
       <ul>
-        <li>Matches: {{ summary.deep_scan.matches }}</li>
-        <li>v1-only (likely incompatible): {{ summary.deep_scan.v1_only }}</li>
-        <li>v2-aware (likely safe): {{ summary.deep_scan.v2_aware }}</li>
-        <li>By confidence: high={{ summary.deep_scan.by_confidence.high }}, medium={{ summary.deep_scan.by_confidence.medium }}, low={{ summary.deep_scan.by_confidence.low }}</li>
+        <li>Matches: {{ ds_val(summary.deep_scan.matches, '^(?!—$)', 'Deep scan: any match') }}</li>
+        <li>v1-only (likely incompatible): {{ ds_val(summary.deep_scan.v1_only, 'v1-only', 'Deep scan: v1-only') }}</li>
+        <li>v2-aware (likely safe): {{ ds_val(summary.deep_scan.v2_aware, 'v2-aware', 'Deep scan: v2-aware') }}</li>
+        <li>By confidence:
+          high={{ ds_val(summary.deep_scan.by_confidence.high, '^high', 'Deep scan: high') }},
+          medium={{ ds_val(summary.deep_scan.by_confidence.medium, '^medium', 'Deep scan: medium') }},
+          low={{ ds_val(summary.deep_scan.by_confidence.low, '^low', 'Deep scan: low') }}
+        </li>
       </ul>
       {% endif %}
     </div>
@@ -205,7 +262,7 @@ section { margin: 30px 0; }
 </div>
 
 <section id="images">
-  <h2>Images ({{ images|length }})</h2>
+  <h2>Images (<span id="images-count">{{ images|length }}</span>)</h2>
   <table id="images-table" class="display">
     <thead>
       <tr>
@@ -217,6 +274,9 @@ section { margin: 30px 0; }
         <th>Go</th>
         <th>Deep scan</th>
         <th>Status</th>
+        <th>Namespaces</th>
+        <th>Registry orgs</th>
+        <th>Registry repos</th>
       </tr>
     </thead>
     <tbody>
@@ -239,6 +299,9 @@ section { margin: 30px 0; }
           {% endif %}
         </td>
         <td class="status-{{ img.overall_status }}">{{ img.overall_status }}</td>
+        <td>{{ img.namespace_values }}</td>
+        <td>{{ img.registry_org_values }}</td>
+        <td>{{ img.registry_repo_values }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -306,6 +369,13 @@ $(document).ready(function() {
   function renderBanner() {
     var names = Object.keys(activeFilters);
     var banner = $('#filter-banner');
+
+    if (imagesTable) {
+      var filtered = imagesTable.rows({ search: 'applied' }).count();
+      var total = imagesTable.rows().count();
+      $('#images-count').text(names.length > 0 ? filtered + ' / ' + total : total);
+    }
+
     if (names.length === 0) {
       banner.hide();
       return;
@@ -328,6 +398,23 @@ $(document).ready(function() {
   };
 
   // ============================================================
+  // Advanced Filters — click-to-filter on group summary tables
+  // ============================================================
+  var ADVANCED_FILTER_COLS = { namespace: 8, registry_org: 9, registry_repo: 10 };
+  var ADVANCED_FILTER_LABELS = { namespace: 'Namespace', registry_org: 'Registry org', registry_repo: 'Registry repo' };
+
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function applyAdvancedFilter(filterKey, value) {
+    var col = ADVANCED_FILTER_COLS[filterKey];
+    var label = ADVANCED_FILTER_LABELS[filterKey] + ': ' + value;
+    var regex = '(?:^|\\|)' + escapeRegex(value) + '(?:$|\\|)';
+    setFilter('advanced', label, col, regex);
+  }
+
+  // ============================================================
   // Consumers child-row helper
   // ============================================================
   function formatConsumers(consumersJson) {
@@ -337,15 +424,19 @@ $(document).ready(function() {
       '<th>Source</th><th>Namespace</th><th>Object type</th><th>Object name</th>' +
       '<th>Container</th><th>Registry org</th><th>Registry repo</th>' +
       '</tr></thead><tbody>';
+    function filterCell(key, val) {
+      if (val) return '<td class="filterable-cell" data-filter-key="' + key + '" data-filter-value="' + val + '">' + val + '</td>';
+      return '<td></td>';
+    }
     consumers.forEach(function(c) {
       html += '<tr>' +
         '<td>' + (c.source || '') + '</td>' +
-        '<td>' + (c.namespace || '') + '</td>' +
+        filterCell('namespace', c.namespace || '') +
         '<td>' + (c.object_type || '') + '</td>' +
         '<td>' + (c.object_name || '') + '</td>' +
         '<td>' + (c.container_name || '') + '</td>' +
-        '<td>' + (c.registry_org || '') + '</td>' +
-        '<td>' + (c.registry_repo || '') + '</td>' +
+        filterCell('registry_org', c.registry_org || '') +
+        filterCell('registry_repo', c.registry_repo || '') +
         '</tr>';
     });
     html += '</tbody></table>';
@@ -357,7 +448,10 @@ $(document).ready(function() {
   // ============================================================
   imagesTable = $('#images-table').DataTable({
     pageLength: 25,
-    order: [[7, 'asc']]
+    order: [[7, 'asc']],
+    columnDefs: [
+      { visible: false, searchable: true, targets: [8, 9, 10] }
+    ]
   });
 
   $('#images-table tbody').on('click', 'td.used-by-cell', function() {
@@ -370,6 +464,38 @@ $(document).ready(function() {
       var jsonText = $(this).find('.consumers-data').text();
       row.child(formatConsumers(jsonText)).show();
       tr.addClass('shown');
+    }
+  });
+
+  $('#images-table tbody').on('click', 'td.filterable-cell', function(e) {
+    e.stopPropagation();
+    var filterKey = $(this).data('filter-key');
+    var value = $(this).data('filter-value');
+    if (filterKey && value) {
+      applyAdvancedFilter(filterKey, value);
+    }
+  });
+
+  $('.compat-summary').on('click', 'td.filterable-cell', function(e) {
+    e.stopPropagation();
+    var filterKey = $(this).data('filter-key');
+    var value = $(this).data('filter-value');
+    if (filterKey && value) {
+      applyAdvancedFilter(filterKey, value);
+    }
+  });
+
+  $('.compat-summary').on('click', 'td.group-status-cell', function(e) {
+    e.stopPropagation();
+    if ($(this).hasClass('empty')) return;
+    var filterKey = $(this).data('filter-key');
+    var value = $(this).data('filter-value');
+    var status = $(this).data('status');
+    if (filterKey && value) {
+      applyAdvancedFilter(filterKey, value);
+    }
+    if (status) {
+      setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
     }
   });
 
@@ -414,32 +540,45 @@ $(document).ready(function() {
   // ============================================================
   var RUNTIME_COLS = { java: 2, node: 3, dotnet: 4, go: 5 };
   var RUNTIME_LABELS = { java: 'Java', node: 'Node.js', dotnet: '.NET', go: 'Go' };
-  var STATE_REGEX = {
-    yes: '^Yes',
-    no: '^No',
-    unknown: '^Unknown',
-    needs_review: '^Needs Review',
-    na: '^N/A',
-    none: '^None',
+  var STATE_TO_STATUS = {
+    yes: 'compatible',
+    no: 'incompatible',
+    unknown: 'needs_review',
+    needs_review: 'needs_review',
   };
-  var STATE_LABELS = {
-    yes: 'Yes',
-    no: 'No',
-    unknown: 'Unknown',
-    needs_review: 'Needs review',
-    na: 'N/A',
-    none: 'None',
-  };
+
+  $('.runtime-name-cell').on('click', function() {
+    var runtime = $(this).data('runtime');
+    var col = RUNTIME_COLS[runtime];
+    if (col === undefined) return;
+    var label = RUNTIME_LABELS[runtime];
+    setFilter(runtime, label, col, '^(?!N/A)');
+  });
 
   $('.compat-cell').on('click', function() {
     if ($(this).hasClass('empty')) return;
     var runtime = $(this).data('runtime');
     var state = $(this).data('state');
     var col = RUNTIME_COLS[runtime];
-    var regex = STATE_REGEX[state];
-    if (col === undefined || regex === undefined) return;
-    var label = RUNTIME_LABELS[runtime] + ': ' + STATE_LABELS[state];
-    window.reportFilters.set(runtime, label, col, regex);
+    if (col === undefined) return;
+    setFilter(runtime, RUNTIME_LABELS[runtime], col, '^(?!N/A)');
+    var status = STATE_TO_STATUS[state];
+    if (status) {
+      setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
+    }
+  });
+
+  // ============================================================
+  // Deep scan drill-down — clickable values in summary bullets
+  // ============================================================
+  var DEEP_SCAN_COL = 6;
+  $('.deep-scan-filter').on('click', function() {
+    if ($(this).hasClass('empty')) return;
+    var regex = $(this).data('ds-regex');
+    var label = $(this).data('ds-label');
+    if (regex && label) {
+      setFilter('deep_scan', label, DEEP_SCAN_COL, regex);
+    }
   });
 
   // ============================================================

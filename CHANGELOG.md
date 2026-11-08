@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- README: "Podman Storage Disk Space" section covering how to reclaim
+  rootless storage that filled `$HOME`, relocate `graphroot`/`runroot`
+  outside home, and fix insufficient subordinate UID/GID ranges.
+- HTML report: "By Namespace", "By Registry org", and "By Registry repo"
+  summary tables in the Summary section, showing overall-status counts per
+  group (same layout as "By runtime"). First column is clickable to filter
+  the images table; count cells apply a dual filter (group + status).
+  Tables scroll vertically when exceeding 10 rows.
+  Namespace/org/repo values in the "Used by" consumer detail are also
+  clickable to apply the same filter. The images-count header updates
+  dynamically when any filter is active.
+- HTML report: "By runtime" table now supports the same dual-filter
+  behaviour — clicking a runtime name filters to images with that runtime;
+  clicking a count cell applies both a runtime filter and a status filter.
 - OpenShift mode: `--include-namespaces` flag retains only containers from
   namespaces matching the given comma-separated glob patterns
   (e.g. `--include-namespaces '*-dev,*-staging'`). Ignored when `--namespace`
