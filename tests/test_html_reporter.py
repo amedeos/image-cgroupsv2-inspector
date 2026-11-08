@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
 
-from src.html_reporter import build_report_context, generate_html_report, render_html_report
+from src.html_reporter import _COMPAT_BUCKETS, build_report_context, generate_html_report, render_html_report
 
 FIXTURE_CSV = Path("tests/fixtures/sample_report.csv")
 SNAPSHOT_PATH = Path("tests/fixtures/expected_context.json")
@@ -77,6 +78,8 @@ def test_build_context_separates_errors():
         ("registry.example/myorg/ds-v2aware:v1", "compatible"),
         ("registry.example/myorg/java-unknown:v1", "needs_review"),
         ("registry.example/myorg/nginx-base:v1", "not_applicable"),
+        ("registry.example/myorg/polyglot:v1", "incompatible"),
+        ("registry.example/myorg/go-unknown:v1", "needs_review"),
     ],
 )
 def test_build_context_overall_status(image_name: str, expected_status: str):
@@ -298,8 +301,46 @@ def test_render_html_compat_cell_empty_class_when_zero():
 def test_render_html_runtime_filter_js_present():
     html = _render_fixture_html()
     assert "RUNTIME_COLS" in html
-    assert "STATE_TO_STATUS" in html
+    assert "runtimeFilter" in html
+    assert "applyFilters" in html
     assert "runtime-name-cell" in html
+
+
+def test_build_context_by_compatibility_counts():
+    """Per-runtime counts only include recognised values; Go Unknown is needs review."""
+    by_compat = _ctx()["summary"]["by_compatibility"]
+    assert by_compat == {
+        "java": {"yes": 2, "no": 1, "needs_review": 1},
+        "node": {"yes": 1, "no": 1, "needs_review": 0},
+        "dotnet": {"yes": 1, "no": 0, "needs_review": 0},
+        "go": {"yes": 2, "no": 1, "needs_review": 2},
+    }
+
+
+def test_build_context_by_compatibility_skips_unrecognised_values(tmp_path: Path):
+    """A runtime present with an off-vocabulary value is not counted in any bucket."""
+    csv = tmp_path / "odd.csv"
+    csv.write_text(
+        CSV_HEADER
+        + "quay,,,,,o,r,img:v1,sha256:x,"
+        + "/usr/bin/java,17,,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,\n"
+    )
+    ctx = build_report_context(csv_path=csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    assert ctx["summary"]["by_compatibility"]["java"] == {"yes": 0, "no": 0, "needs_review": 0}
+
+
+def test_compat_buckets_match_by_runtime_columns():
+    """report.html.j2 renders one "By runtime" column (and STATE_LABELS entry) per
+    bucket; changing the buckets requires updating the template too."""
+    assert set(_COMPAT_BUCKETS.values()) == {"yes", "no", "needs_review"}
+
+
+def test_render_html_embeds_compat_buckets_and_raw_columns():
+    """The JS click filters are built from _COMPAT_BUCKETS and match hidden raw-value columns."""
+    html = _render_fixture_html()
+    assert "var COMPAT_BUCKETS = " + json.dumps(_COMPAT_BUCKETS, sort_keys=True) in html
+    assert "<th>Go compat</th>" in html
+    assert "<td>Needs Review</td>" in html
 
 
 # ---------------------------------------------------------------------------
@@ -316,13 +357,54 @@ def test_build_context_by_group_tables_present():
 
     assert sorted(s["by_namespace"].keys()) == ["dev", "prod"]
     assert s["by_registry_org"] == {
-        "myorg": {"compatible": 3, "incompatible": 3, "needs_review": 2, "not_applicable": 1},
+        "myorg": {"compatible": 3, "incompatible": 3, "needs_review": 3, "not_applicable": 1},
     }
     assert "java-app" in s["by_registry_repo"]
     assert "nginx-base" in s["by_registry_repo"]
 
     for counts in s["by_namespace"].values():
         assert set(counts.keys()) == {"compatible", "incompatible", "needs_review", "not_applicable"}
+
+
+def test_build_context_multi_namespace_image_counted_in_each_group():
+    ctx = _ctx()
+    poly = next(img for img in ctx["images"] if img["image_name"] == "registry.example/myorg/polyglot:v1")
+    assert poly["namespace_values"] == "dev|prod"
+    assert ctx["summary"]["by_namespace"] == {
+        "prod": {"compatible": 0, "incompatible": 2, "needs_review": 0, "not_applicable": 0},
+        "dev": {"compatible": 2, "incompatible": 1, "needs_review": 0, "not_applicable": 0},
+    }
+
+
+def test_build_context_group_values_split_on_pipe(tmp_path: Path):
+    """A pipe in a value is split like the template's hidden-column filter does."""
+    csv = tmp_path / "pipe.csv"
+    csv.write_text(
+        CSV_HEADER
+        + "quay,,,,,o,a|b,img:v1,sha256:x,"
+        + "None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,\n"
+    )
+    ctx = build_report_context(csv_path=csv, tool_version="2.0.0", generated_at=FIXED_TS)
+    assert list(ctx["summary"]["by_registry_repo"]) == ["a", "b"]
+    assert ctx["images"][0]["registry_repo_values"] == "a|b"
+
+
+def test_build_context_group_tables_sorted_by_incompatible():
+    """Groups are ordered by incompatible, then needs review (both desc), then name."""
+    s = _ctx()["summary"]
+    assert list(s["by_namespace"]) == ["prod", "dev"]
+    assert list(s["by_registry_repo"]) == [
+        "ds-v1only",
+        "go-old",
+        "java-old",
+        "go-review",
+        "go-unknown",
+        "java-unknown",
+        "ds-v2aware",
+        "go-modern",
+        "java-app",
+        "nginx-base",
+    ]
 
 
 def test_build_context_per_image_filter_values():
@@ -373,8 +455,14 @@ def test_render_html_group_filter_js_present():
     html = _render_fixture_html()
     assert "ADVANCED_FILTER_COLS" in html
     assert "ADVANCED_FILTER_LABELS" in html
-    assert "escapeRegex" in html
-    assert "applyAdvancedFilter" in html
+    assert "$.fn.dataTable.util.escapeRegex(String(value))" in html
+    assert "escapeHtml" in html
+    assert "advancedFilter" in html
+
+
+def test_render_html_group_name_cells_are_buttons():
+    html = _render_fixture_html()
+    assert re.search(r'data-filter-key="namespace" data-filter-value="prod"\s+tabindex="0" role="button"', html)
 
 
 def test_render_html_hidden_columns_present():
@@ -382,7 +470,7 @@ def test_render_html_hidden_columns_present():
     assert "<th>Namespaces</th>" in html
     assert "<th>Registry orgs</th>" in html
     assert "<th>Registry repos</th>" in html
-    assert "visible: false, searchable: true, targets: [8, 9, 10]" in html
+    assert "visible: false, searchable: true, targets: [8, 9, 10, 11, 12, 13, 14]" in html
 
 
 def test_render_html_no_group_tables_when_empty(tmp_path: Path):

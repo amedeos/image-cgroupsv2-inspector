@@ -1001,7 +1001,7 @@ podman info --format 'GraphRoot={{.Store.GraphRoot}} RunRoot={{.Store.RunRoot}}'
 When home is already full, a full reset of rootless storage is the reliable cleanup:
 
 ```bash
-# Remove all local images, containers, and storage metadata
+# Remove ALL of this user's podman data: images, containers, pods, volumes, networks
 podman system reset -f
 
 # Verify
@@ -1009,38 +1009,41 @@ du -sh ~/.local/share/containers/storage 2>/dev/null
 df -h "$HOME"
 ```
 
-If space remains after the reset, remove the leftover directory:
+If space remains after the reset, remove the leftover layers from inside the user namespace (they are owned by subordinate UIDs, so a plain `rm -rf` usually fails with permission denied):
 
 ```bash
-rm -rf ~/.local/share/containers
+podman unshare rm -rf ~/.local/share/containers/storage
 ```
 
-> **Note:** `podman system reset -f` deletes local images and containers for the current user. Re-pulls will be required on the next analysis run. Prefer `--resume` afterward so already-analyzed images are not reprocessed.
+> **Note:** `podman system reset -f` deletes **all** podman data of the current user (images, containers, pods, volumes and networks), not just the images pulled by this tool. On shared bastions check `podman ps -a` and `podman volume ls` first. Re-pulls will be required on the next analysis run; prefer `--resume` afterward so already-analyzed images are not reprocessed.
 
 ### Move podman storage out of home
 
-To avoid saturating `$HOME` again, point `graphroot` and `runroot` at a filesystem with more free space (for example `/var/tmp` or a dedicated data volume):
+To avoid saturating `$HOME` again, point `graphroot` at a persistent filesystem with more free space, such as a dedicated data volume. `runroot` does not need to move: for rootless users it defaults to `/run/user/$UID`, not `$HOME`.
+
+Run the reset above **before** editing `storage.conf`: `podman system reset` only cleans the storage configured at the time it runs, so after the change it no longer touches the old path.
 
 ```bash
-# Pick a destination with enough free space
-mkdir -p /var/tmp/"$USER"/podman-storage
-mkdir -p /var/tmp/"$USER"/podman-run
+# Example path: use a dedicated directory you can write to, on a persistent
+# filesystem with enough free space (an admin may need to create the parent
+# and chown it to you first)
+STORAGE_DIR=/data/"$USER"/podman-storage
+mkdir -p "$STORAGE_DIR"
 
 mkdir -p ~/.config/containers
 cat > ~/.config/containers/storage.conf <<EOF
 [storage]
 driver = "overlay"
-graphroot = "/var/tmp/$USER/podman-storage"
-runroot = "/var/tmp/$USER/podman-run"
+graphroot = "$STORAGE_DIR"
 EOF
 
-# Confirm the new locations
+# Confirm the new location
 podman info --format 'GraphRoot={{.Store.GraphRoot}} RunRoot={{.Store.RunRoot}}'
 ```
 
-After changing `storage.conf`, images already stored under the old path are no longer visible to podman: reclaim that space with the reset steps above (if you have not already), then re-pull as needed.
+If `storage.conf` was already changed before resetting, the old layers stay under `~/.local/share/containers/storage`, invisible to podman. Remove them with `podman unshare rm -rf ~/.local/share/containers/storage`.
 
-> **Tip:** Prefer a persistent mount when available. Paths under `/tmp` or `/var/tmp` may be cleared on reboot depending on host policy.
+> **Tip:** Avoid `/tmp` and `/var/tmp` for `graphroot`. Besides reboot cleanup, on RHEL/Fedora `systemd-tmpfiles` periodically deletes `/var/tmp` entries unused for 30 days, which corrupts podman storage. Keep `graphroot` in a dedicated directory, since a later `podman system reset` deletes it.
 
 ### Related pull failure: insufficient subordinate UIDs/GIDs
 

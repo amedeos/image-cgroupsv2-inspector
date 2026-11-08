@@ -5,20 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- README: "Podman Storage Disk Space" section covering how to reclaim
-  rootless storage that filled `$HOME`, relocate `graphroot`/`runroot`
-  outside home, and fix insufficient subordinate UID/GID ranges.
-- HTML report: "By Namespace", "By Registry org", and "By Registry repo"
-  summary tables in the Summary section, showing overall-status counts per
-  group (same layout as "By runtime"). First column is clickable to filter
-  the images table; count cells apply a dual filter (group + status).
-  Tables scroll vertically when exceeding 10 rows.
-  Namespace/org/repo values in the "Used by" consumer detail are also
-  clickable to apply the same filter. The images-count header updates
-  dynamically when any filter is active.
-- HTML report: "By runtime" table now supports the same dual-filter
-  behaviour — clicking a runtime name filters to images with that runtime;
-  clicking a count cell applies both a runtime filter and a status filter.
+- README: "Podman Storage Disk Space" section (reclaiming rootless storage,
+  moving `graphroot` out of `$HOME`, subordinate UID/GID ranges).
+- HTML report: "By Namespace", "By Registry org" and "By Registry repo"
+  summary tables, sorted by incompatible count.
+- HTML report: runtime names, group names, "Used by" values and deep-scan
+  counts filter the images table; the header shows `filtered / total`.
 - OpenShift mode: `--include-namespaces` flag retains only containers from
   namespaces matching the given comma-separated glob patterns
   (e.g. `--include-namespaces '*-dev,*-staging'`). Ignored when `--namespace`
@@ -30,7 +22,17 @@ All notable changes to this project will be documented in this file.
   Basic auth for Quay installations where OAuth Application Tokens are not
   available (e.g., robot accounts or docker-login credentials).
 
+### Changed
+- HTML report: "By runtime" columns renamed to Compatible / Incompatible /
+  Needs review; the N/A column is removed.
+- HTML report: clicking a count in "By runtime" or the group tables replaces
+  the active filters and clears the search box, so the table shows exactly
+  that many images.
+
 ### Fixed
+- HTML report: Go images with `Unknown` compatibility count as needs review
+  in "By runtime" instead of being lumped with N/A.
+- HTML report: consumer details in the "Used by" row are now HTML-escaped.
 - Quay/JFrog modes: `--registry-url` and `--jfrog-url` no longer crash when
   the URL is passed without an `https://` scheme prefix; the scheme is now
   prepended automatically.

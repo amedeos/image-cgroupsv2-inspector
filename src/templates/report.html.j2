@@ -149,19 +149,19 @@ section { margin: 30px 0; }
             <td class="filterable-cell runtime-name-cell" data-runtime="java" tabindex="0" role="button">Java</td>
             {{ compat_cell('java', 'yes', summary.by_compatibility.java.yes) }}
             {{ compat_cell('java', 'no', summary.by_compatibility.java.no) }}
-            {{ compat_cell('java', 'unknown', summary.by_compatibility.java.unknown) }}
+            {{ compat_cell('java', 'needs_review', summary.by_compatibility.java.needs_review) }}
           </tr>
           <tr>
             <td class="filterable-cell runtime-name-cell" data-runtime="node" tabindex="0" role="button">Node.js</td>
             {{ compat_cell('node', 'yes', summary.by_compatibility.node.yes) }}
             {{ compat_cell('node', 'no', summary.by_compatibility.node.no) }}
-            {{ compat_cell('node', 'unknown', summary.by_compatibility.node.unknown) }}
+            {{ compat_cell('node', 'needs_review', summary.by_compatibility.node.needs_review) }}
           </tr>
           <tr>
             <td class="filterable-cell runtime-name-cell" data-runtime="dotnet" tabindex="0" role="button">.NET</td>
             {{ compat_cell('dotnet', 'yes', summary.by_compatibility.dotnet.yes) }}
             {{ compat_cell('dotnet', 'no', summary.by_compatibility.dotnet.no) }}
-            {{ compat_cell('dotnet', 'unknown', summary.by_compatibility.dotnet.unknown) }}
+            {{ compat_cell('dotnet', 'needs_review', summary.by_compatibility.dotnet.needs_review) }}
           </tr>
           <tr>
             <td class="filterable-cell runtime-name-cell" data-runtime="go" tabindex="0" role="button">Go</td>
@@ -181,7 +181,8 @@ section { margin: 30px 0; }
           <tbody>
           {% for name, counts in data.items() %}
             <tr>
-              <td class="filterable-cell" data-filter-key="{{ filter_key }}" data-filter-value="{{ name }}">{{ name }}</td>
+              <td class="filterable-cell" data-filter-key="{{ filter_key }}" data-filter-value="{{ name }}"
+                  tabindex="0" role="button">{{ name }}</td>
               {% for status, count in [("compatible", counts.compatible), ("incompatible", counts.incompatible), ("needs_review", counts.needs_review), ("not_applicable", counts.not_applicable)] %}
               {% if count > 0 %}
               <td class="group-status-cell" data-filter-key="{{ filter_key }}" data-filter-value="{{ name }}" data-status="{{ status }}"
@@ -277,6 +278,10 @@ section { margin: 30px 0; }
         <th>Namespaces</th>
         <th>Registry orgs</th>
         <th>Registry repos</th>
+        <th>Java compat</th>
+        <th>Node.js compat</th>
+        <th>.NET compat</th>
+        <th>Go compat</th>
       </tr>
     </thead>
     <tbody>
@@ -302,6 +307,10 @@ section { margin: 30px 0; }
         <td>{{ img.namespace_values }}</td>
         <td>{{ img.registry_org_values }}</td>
         <td>{{ img.registry_repo_values }}</td>
+        <td>{{ img.java.compatible }}</td>
+        <td>{{ img.node.compatible }}</td>
+        <td>{{ img.dotnet.compatible }}</td>
+        <td>{{ img.go.compatible }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -343,10 +352,45 @@ $(document).ready(function() {
   var activeFilters = {};
   var imagesTable = null;
 
-  function setFilter(name, label, columnIndex, regex) {
-    activeFilters[name] = { label: label, columnIndex: columnIndex, regex: regex };
-    imagesTable.column(columnIndex).search(regex, true, false).draw();
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Each filter is { name, label, columnIndex, regex, caseSensitive }.
+  // With opts.replace every active filter and the search box are cleared
+  // first, so the table shows exactly what the clicked summary number counts.
+  function applyFilters(filters, opts) {
+    if (opts && opts.replace) {
+      Object.keys(activeFilters).forEach(function(n) {
+        imagesTable.column(activeFilters[n].columnIndex).search('');
+      });
+      activeFilters = {};
+      imagesTable.search('');
+    }
+    filters.forEach(function(f) {
+      activeFilters[f.name] = f;
+      imagesTable.column(f.columnIndex).search(f.regex, true, false, !f.caseSensitive);
+    });
+    imagesTable.draw();
     renderBanner();
+  }
+
+  function setFilter(name, label, columnIndex, regex) {
+    applyFilters([{ name: name, label: label, columnIndex: columnIndex, regex: regex }]);
+  }
+
+  function statusFilter(status) {
+    return {
+      name: 'status',
+      label: 'Status: ' + status.replace(/_/g, ' '),
+      columnIndex: STATUS_COL,
+      regex: '^' + status + '$',
+    };
   }
 
   function clearFilter(name) {
@@ -357,6 +401,7 @@ $(document).ready(function() {
     renderBanner();
   }
 
+  // Clears the filter tags only; the DataTables search box is left alone.
   function clearAllFilters() {
     Object.keys(activeFilters).forEach(function(n) {
       imagesTable.column(activeFilters[n].columnIndex).search('');
@@ -366,24 +411,22 @@ $(document).ready(function() {
     renderBanner();
   }
 
+  function updateImagesCount() {
+    var filtered = imagesTable.rows({ search: 'applied' }).count();
+    var total = imagesTable.rows().count();
+    $('#images-count').text(filtered < total ? filtered + ' / ' + total : total);
+  }
+
   function renderBanner() {
     var names = Object.keys(activeFilters);
     var banner = $('#filter-banner');
-
-    if (imagesTable) {
-      var filtered = imagesTable.rows({ search: 'applied' }).count();
-      var total = imagesTable.rows().count();
-      $('#images-count').text(names.length > 0 ? filtered + ' / ' + total : total);
-    }
-
     if (names.length === 0) {
       banner.hide();
       return;
     }
     var tagsHtml = names.map(function(n) {
-      var f = activeFilters[n];
-      return '<span class="tag" data-filter-name="' + n + '">' +
-        f.label +
+      return '<span class="tag" data-filter-name="' + escapeHtml(n) + '">' +
+        escapeHtml(activeFilters[n].label) +
         ' <span class="remove" title="Remove this filter">\u00d7</span>' +
         '</span>';
     }).join(' ');
@@ -403,15 +446,15 @@ $(document).ready(function() {
   var ADVANCED_FILTER_COLS = { namespace: 8, registry_org: 9, registry_repo: 10 };
   var ADVANCED_FILTER_LABELS = { namespace: 'Namespace', registry_org: 'Registry org', registry_repo: 'Registry repo' };
 
-  function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  function applyAdvancedFilter(filterKey, value) {
-    var col = ADVANCED_FILTER_COLS[filterKey];
-    var label = ADVANCED_FILTER_LABELS[filterKey] + ': ' + value;
-    var regex = '(?:^|\\|)' + escapeRegex(value) + '(?:$|\\|)';
-    setFilter('advanced', label, col, regex);
+  // One filter key per group type, case-sensitive like the Python grouping.
+  function advancedFilter(filterKey, value) {
+    return {
+      name: filterKey,
+      label: ADVANCED_FILTER_LABELS[filterKey] + ': ' + value,
+      columnIndex: ADVANCED_FILTER_COLS[filterKey],
+      regex: '(?:^|\\|)' + $.fn.dataTable.util.escapeRegex(String(value)) + '(?:$|\\|)',
+      caseSensitive: true,
+    };
   }
 
   // ============================================================
@@ -424,19 +467,25 @@ $(document).ready(function() {
       '<th>Source</th><th>Namespace</th><th>Object type</th><th>Object name</th>' +
       '<th>Container</th><th>Registry org</th><th>Registry repo</th>' +
       '</tr></thead><tbody>';
+    function cell(val) {
+      return '<td>' + escapeHtml(val || '') + '</td>';
+    }
     function filterCell(key, val) {
-      if (val) return '<td class="filterable-cell" data-filter-key="' + key + '" data-filter-value="' + val + '">' + val + '</td>';
-      return '<td></td>';
+      if (!val) return '<td></td>';
+      // Grouping splits on "|", so a raw "a|b" value has no group to filter on.
+      if (val.indexOf('|') !== -1) return cell(val);
+      return '<td class="filterable-cell" data-filter-key="' + key + '" data-filter-value="' + escapeHtml(val) +
+        '" tabindex="0" role="button">' + escapeHtml(val) + '</td>';
     }
     consumers.forEach(function(c) {
       html += '<tr>' +
-        '<td>' + (c.source || '') + '</td>' +
-        filterCell('namespace', c.namespace || '') +
-        '<td>' + (c.object_type || '') + '</td>' +
-        '<td>' + (c.object_name || '') + '</td>' +
-        '<td>' + (c.container_name || '') + '</td>' +
-        filterCell('registry_org', c.registry_org || '') +
-        filterCell('registry_repo', c.registry_repo || '') +
+        cell(c.source) +
+        filterCell('namespace', c.namespace) +
+        cell(c.object_type) +
+        cell(c.object_name) +
+        cell(c.container_name) +
+        filterCell('registry_org', c.registry_org) +
+        filterCell('registry_repo', c.registry_repo) +
         '</tr>';
     });
     html += '</tbody></table>';
@@ -450,7 +499,7 @@ $(document).ready(function() {
     pageLength: 25,
     order: [[7, 'asc']],
     columnDefs: [
-      { visible: false, searchable: true, targets: [8, 9, 10] }
+      { visible: false, searchable: true, targets: [8, 9, 10, 11, 12, 13, 14] }
     ]
   });
 
@@ -467,36 +516,27 @@ $(document).ready(function() {
     }
   });
 
-  $('#images-table tbody').on('click', 'td.filterable-cell', function(e) {
-    e.stopPropagation();
-    var filterKey = $(this).data('filter-key');
-    var value = $(this).data('filter-value');
-    if (filterKey && value) {
-      applyAdvancedFilter(filterKey, value);
-    }
+  imagesTable.on('draw', updateImagesCount);
+
+  // Group names (summary tables and "Used by" detail) add to the active
+  // filters. attr() rather than data(): jQuery would coerce "2024"/"false".
+  $(document).on('click', 'td.filterable-cell[data-filter-key]', function() {
+    var filterKey = $(this).attr('data-filter-key');
+    var value = $(this).attr('data-filter-value');
+    if (ADVANCED_FILTER_COLS[filterKey] === undefined || !value) return;
+    applyFilters([advancedFilter(filterKey, value)]);
+    // The redraw re-attaches "Used by" rows; keep keyboard focus on the cell.
+    if (document.body.contains(this)) this.focus();
   });
 
-  $('.compat-summary').on('click', 'td.filterable-cell', function(e) {
-    e.stopPropagation();
-    var filterKey = $(this).data('filter-key');
-    var value = $(this).data('filter-value');
-    if (filterKey && value) {
-      applyAdvancedFilter(filterKey, value);
-    }
-  });
-
-  $('.compat-summary').on('click', 'td.group-status-cell', function(e) {
-    e.stopPropagation();
+  // Group count cells replace the active filters with group + status.
+  $('.compat-summary').on('click', 'td.group-status-cell', function() {
     if ($(this).hasClass('empty')) return;
-    var filterKey = $(this).data('filter-key');
-    var value = $(this).data('filter-value');
-    var status = $(this).data('status');
-    if (filterKey && value) {
-      applyAdvancedFilter(filterKey, value);
-    }
-    if (status) {
-      setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
-    }
+    var filterKey = $(this).attr('data-filter-key');
+    var value = $(this).attr('data-filter-value');
+    var status = $(this).attr('data-status');
+    if (ADVANCED_FILTER_COLS[filterKey] === undefined || !value || !status) return;
+    applyFilters([advancedFilter(filterKey, value), statusFilter(status)], { replace: true });
   });
 
   if ($('#errors-table').length) {
@@ -509,7 +549,7 @@ $(document).ready(function() {
   $('.card.status-card').on('click', function() {
     if ($(this).hasClass('empty')) return;
     var status = $(this).data('filter-status');
-    setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
+    applyFilters([statusFilter(status)]);
   });
 
   $('.card.total-card').on('click', clearAllFilters);
@@ -520,7 +560,7 @@ $(document).ready(function() {
   function handleStatusShortcut(e) {
     var status = $(this).data('filter-status');
     if (!status) return;
-    setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
+    applyFilters([statusFilter(status)]);
   }
   $('.pie-slice').on('click', handleStatusShortcut);
   $('.chart-legend li').on('click', handleStatusShortcut);
@@ -531,41 +571,60 @@ $(document).ready(function() {
   $('#clear-filters').on('click', clearAllFilters);
   $('#filter-tags').on('click', '.tag .remove', function(e) {
     e.stopPropagation();
-    var name = $(this).closest('.tag').data('filter-name');
+    var name = $(this).closest('.tag').attr('data-filter-name');
     clearFilter(name);
   });
 
   // ============================================================
   // Runtime drill-down — clickable cells in "By runtime" table
   // ============================================================
-  var RUNTIME_COLS = { java: 2, node: 3, dotnet: 4, go: 5 };
+  // Hidden columns holding each runtime's raw compatibility value.
+  var RUNTIME_COLS = { java: 11, node: 12, dotnet: 13, go: 14 };
   var RUNTIME_LABELS = { java: 'Java', node: 'Node.js', dotnet: '.NET', go: 'Go' };
-  var STATE_TO_STATUS = {
-    yes: 'compatible',
-    no: 'incompatible',
-    unknown: 'needs_review',
-    needs_review: 'needs_review',
+  var STATE_LABELS = {
+    yes: 'Compatible',
+    no: 'Incompatible',
+    needs_review: 'Needs review',
   };
 
-  $('.runtime-name-cell').on('click', function() {
-    var runtime = $(this).data('runtime');
-    var col = RUNTIME_COLS[runtime];
-    if (col === undefined) return;
-    var label = RUNTIME_LABELS[runtime];
-    setFilter(runtime, label, col, '^(?!N/A)');
+  // _COMPAT_BUCKETS from src/html_reporter.py (value -> bucket). Filters match
+  // the raw value exactly, so the rows shown after a click are the number in
+  // the clicked cell (or, for a runtime name, the row's total).
+  var COMPAT_BUCKETS = {{ compat_buckets|tojson }};
+  function exactRegex(values) {
+    return '^(?:' + values.map($.fn.dataTable.util.escapeRegex).join('|') + ')$';
+  }
+  var STATE_VALUES = {};
+  Object.keys(COMPAT_BUCKETS).forEach(function(value) {
+    var bucket = COMPAT_BUCKETS[value];
+    (STATE_VALUES[bucket] = STATE_VALUES[bucket] || []).push(value);
   });
 
+  // Without a state: any recognised value, i.e. the runtime was detected.
+  function runtimeFilter(runtime, state) {
+    return {
+      name: runtime,
+      label: RUNTIME_LABELS[runtime] + (state ? ': ' + STATE_LABELS[state] : ''),
+      columnIndex: RUNTIME_COLS[runtime],
+      regex: exactRegex(state ? STATE_VALUES[state] : Object.keys(COMPAT_BUCKETS)),
+      caseSensitive: true,
+    };
+  }
+
+  // Runtime name: add "runtime detected" to the active filters.
+  $('.runtime-name-cell').on('click', function() {
+    var runtime = $(this).attr('data-runtime');
+    if (RUNTIME_COLS[runtime] === undefined) return;
+    applyFilters([runtimeFilter(runtime)]);
+  });
+
+  // Runtime count cell: replace the active filters with that runtime state.
   $('.compat-cell').on('click', function() {
     if ($(this).hasClass('empty')) return;
-    var runtime = $(this).data('runtime');
-    var state = $(this).data('state');
-    var col = RUNTIME_COLS[runtime];
-    if (col === undefined) return;
-    setFilter(runtime, RUNTIME_LABELS[runtime], col, '^(?!N/A)');
-    var status = STATE_TO_STATUS[state];
-    if (status) {
-      setFilter('status', 'Status: ' + status.replace(/_/g, ' '), STATUS_COL, '^' + status + '$');
-    }
+    var runtime = $(this).attr('data-runtime');
+    var state = $(this).attr('data-state');
+    if (RUNTIME_COLS[runtime] === undefined || STATE_VALUES[state] === undefined) return;
+    applyFilters([runtimeFilter(runtime, state)], { replace: true });
   });
 
   // ============================================================
@@ -574,8 +633,8 @@ $(document).ready(function() {
   var DEEP_SCAN_COL = 6;
   $('.deep-scan-filter').on('click', function() {
     if ($(this).hasClass('empty')) return;
-    var regex = $(this).data('ds-regex');
-    var label = $(this).data('ds-label');
+    var regex = $(this).attr('data-ds-regex');
+    var label = $(this).attr('data-ds-label');
     if (regex && label) {
       setFilter('deep_scan', label, DEEP_SCAN_COL, regex);
     }
