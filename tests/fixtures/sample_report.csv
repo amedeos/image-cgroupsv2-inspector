@@ -12,4 +12,7 @@ quay,,,,,myorg,ds-v1only,registry.example/myorg/ds-v1only:v1,sha256:hhh,None,Non
 quay,,,,,myorg,ds-v2aware,registry.example/myorg/ds-v2aware:v1,sha256:iii,None,None,N/A,None,None,N/A,None,None,N/A,/usr/bin/cadvisor,go1.20.0,Yes,None,true,low,binary:/usr/bin/cadvisor,memory.limit_in_bytes|cpu.cfs_quota_us,true,
 quay,,,,,myorg,java-unknown,registry.example/myorg/java-unknown:v1,sha256:jjj,/usr/bin/java,None,Unknown,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,
 quay,,,,,myorg,nginx-base,registry.example/myorg/nginx-base:v1,sha256:kkk,None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,
+openshift,poly-container,dev,Deployment,poly,,,registry.example/myorg/polyglot:v1,sha256:lll,/usr/bin/java,17.0.18,Yes,/usr/bin/node,v14.21.0,No,None,None,N/A,None,None,N/A,None,false,,,,,
+openshift,poly-container,prod,Deployment,poly,,,registry.example/myorg/polyglot:v1,sha256:lll,/usr/bin/java,17.0.18,Yes,/usr/bin/node,v14.21.0,No,None,None,N/A,None,None,N/A,None,false,,,,,
+quay,,,,,myorg,go-unknown,registry.example/myorg/go-unknown:v1,sha256:mmm,None,None,N/A,None,None,N/A,None,None,N/A,/app/bin,unknown,Unknown,None,false,,,,,
 quay,,,,,myorg,broken-image,registry.example/myorg/broken:v1,,None,None,N/A,None,None,N/A,None,None,N/A,None,None,N/A,None,false,,,,,podman pull failed: manifest unknown

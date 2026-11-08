@@ -172,38 +172,42 @@ def _deep_scan_fields(rows: list[dict]) -> dict:
     }
 
 
+# Recognised runtime compatibility values and the bucket each one feeds, for
+# both the overall status and the "By runtime" counts. Anything else (N/A,
+# empty, malformed) is not counted. The template builds its click filters from
+# this map (exact match on hidden raw-value columns), so a clicked cell always
+# shows exactly its count. The template renders one column per bucket.
+_COMPAT_BUCKETS = {"Yes": "yes", "No": "no", "Unknown": "needs_review", "Needs Review": "needs_review"}
+
+
 def _compute_overall_status(runtime_data: dict, deep_scan_data: dict) -> str:
-    compatibles = [runtime_data[rt]["compatible"] for rt in _RUNTIMES]
-
-    has_no = any(c == "No" for c in compatibles)
+    buckets = {_COMPAT_BUCKETS.get(runtime_data[rt]["compatible"]) for rt in _RUNTIMES}
     has_deep_v1_only = deep_scan_data["match"] and deep_scan_data["v2_aware"] is False
-    has_needs_review = any(c in ("Needs Review", "Unknown") for c in compatibles)
-    has_yes = any(c == "Yes" for c in compatibles)
 
-    if has_no or has_deep_v1_only:
+    if "no" in buckets or has_deep_v1_only:
         return "incompatible"
-    if has_needs_review:
+    if "needs_review" in buckets:
         return "needs_review"
-    if has_yes:
+    if "yes" in buckets:
         return "compatible"
     return "not_applicable"
 
 
 _STATUS_BUCKETS = ("compatible", "incompatible", "needs_review", "not_applicable")
 
+_GROUP_FIELDS = ("namespace", "registry_org", "registry_repo")
 
-def _build_by_group(images: list[dict], values_key: str) -> dict[str, dict[str, int]]:
-    """Aggregate overall_status counts grouped by a pipe-separated image field."""
-    result: dict[str, dict[str, int]] = {}
-    for img in images:
-        raw = img.get(values_key, "")
-        if not raw:
-            continue
-        for val in raw.split("|"):
-            if val not in result:
-                result[val] = {s: 0 for s in _STATUS_BUCKETS}
-            result[val][img["overall_status"]] += 1
-    return dict(sorted(result.items()))
+
+def _add_to_group(groups: dict[str, dict[str, int]], values: list[str], status: str) -> None:
+    for val in values:
+        if val not in groups:
+            groups[val] = {s: 0 for s in _STATUS_BUCKETS}
+        groups[val][status] += 1
+
+
+def _sorted_groups(groups: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
+    """Most incompatible first, then most needs-review, then by name."""
+    return dict(sorted(groups.items(), key=lambda kv: (-kv[1]["incompatible"], -kv[1]["needs_review"], kv[0])))
 
 
 def _compute_source_mode(sources: set[str]) -> str:
@@ -249,6 +253,7 @@ def build_report_context(
             sources.add(row.get("source", ""))
 
     images = []
+    by_group: dict[str, dict[str, dict[str, int]]] = {f: {} for f in _GROUP_FIELDS}
 
     for img_name in sorted(image_rows):
         img_group = image_rows[img_name]
@@ -257,18 +262,20 @@ def build_report_context(
         overall_status = _compute_overall_status(runtime_data, deep_scan_data)
         consumers = [_build_consumer(r) for r in img_group]
 
-        ns_vals = sorted({c["namespace"] for c in consumers if c["namespace"]})
-        org_vals = sorted({c["registry_org"] for c in consumers if c["registry_org"]})
-        repo_vals = sorted({c["registry_repo"] for c in consumers if c["registry_repo"]})
+        # Split on "|" like the template's hidden-column filter, so a group's
+        # count and the rows its click shows always agree.
+        group_vals = {f: sorted({v for c in consumers for v in c[f].split("|") if v}) for f in _GROUP_FIELDS}
+        for field, vals in group_vals.items():
+            _add_to_group(by_group[field], vals, overall_status)
 
         entry = {
             "image_name": img_name,
             "image_id": img_group[0].get("image_id", ""),
             "used_by_count": len(consumers),
             "consumers": consumers,
-            "namespace_values": "|".join(ns_vals),
-            "registry_org_values": "|".join(org_vals),
-            "registry_repo_values": "|".join(repo_vals),
+            "namespace_values": "|".join(group_vals["namespace"]),
+            "registry_org_values": "|".join(group_vals["registry_org"]),
+            "registry_repo_values": "|".join(group_vals["registry_repo"]),
             **runtime_data,
             "deep_scan": deep_scan_data,
             "overall_status": overall_status,
@@ -286,26 +293,16 @@ def build_report_context(
             }
         )
 
-    by_overall = {"compatible": 0, "incompatible": 0, "needs_review": 0, "not_applicable": 0}
+    by_overall = {s: 0 for s in _STATUS_BUCKETS}
     for img in images:
         by_overall[img["overall_status"]] += 1
 
-    by_compat = {
-        "java": {"yes": 0, "no": 0, "unknown": 0, "na": 0},
-        "node": {"yes": 0, "no": 0, "unknown": 0, "na": 0},
-        "dotnet": {"yes": 0, "no": 0, "unknown": 0, "na": 0},
-        "go": {"yes": 0, "no": 0, "needs_review": 0, "none": 0},
-    }
+    by_compat = {rt: {b: 0 for b in dict.fromkeys(_COMPAT_BUCKETS.values())} for rt in _RUNTIMES}
     for img in images:
         for rt in _RUNTIMES:
-            compat_val = img[rt]["compatible"]
-            if rt == "go":
-                mapping = {"Yes": "yes", "No": "no", "Needs Review": "needs_review"}
-                key = mapping.get(compat_val, "none")
-            else:
-                mapping = {"Yes": "yes", "No": "no", "Unknown": "unknown"}
-                key = mapping.get(compat_val, "na")
-            by_compat[rt][key] += 1
+            bucket = _COMPAT_BUCKETS.get(img[rt]["compatible"])
+            if bucket is not None:
+                by_compat[rt][bucket] += 1
 
     ds_matches = [img for img in images if img["deep_scan"]["match"]]
     ds_enabled = any(row.get("deep_scan_match", "").strip() for row in rows)
@@ -326,9 +323,9 @@ def build_report_context(
         "with_errors": total_error_rows,
         "by_overall_status": by_overall,
         "by_compatibility": by_compat,
-        "by_namespace": _build_by_group(images, "namespace_values"),
-        "by_registry_org": _build_by_group(images, "registry_org_values"),
-        "by_registry_repo": _build_by_group(images, "registry_repo_values"),
+        "by_namespace": _sorted_groups(by_group["namespace"]),
+        "by_registry_org": _sorted_groups(by_group["registry_org"]),
+        "by_registry_repo": _sorted_groups(by_group["registry_repo"]),
         "deep_scan": {
             "enabled": ds_enabled,
             "matches": len(ds_matches),
@@ -350,6 +347,7 @@ def build_report_context(
         "summary": summary,
         "images": images,
         "errors": errors,
+        "compat_buckets": _COMPAT_BUCKETS,
     }
 
 
